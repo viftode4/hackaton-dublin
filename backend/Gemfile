@@ -1,7 +1,7 @@
 source "https://rubygems.org"
 git_source(:github) { |repo| "https://github.com/#{repo}.git" }
 
-ruby "4.0.1"
+ruby ">= 3.2"
 
 # Rails
 gem "rails", "~> 7.1.0"
@@ -15,8 +15,12 @@ gem "sqlite3"
 gem "rack-cors"
 
 # External APIs
-# gem "anthropic-sdk"  # TODO: Verify correct gem name with P2
+gem "anthropic", "~> 1.23"  # Official Anthropic SDK with tool_runner
 gem "stripe"
+gem "paid_ruby"             # Paid.ai — AI agent usage metering, billing, cost tracking
+
+# Timezone data (required for Alpine Linux)
+gem "tzinfo-data"
 
 # Environment
 gem "dotenv-rails", groups: [:development, :test]

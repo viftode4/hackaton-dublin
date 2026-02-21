@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
-# Configure Anthropic SDK for Claude API
-if ENV['CLAUDE_API_KEY'].present?
-  Anthropic.configure do |config|
-    config.access_token = ENV['CLAUDE_API_KEY']
-  end
-end
+# The Anthropic SDK is used via ClaudeService which creates its own client.
+# No global configuration needed — API key is read from ENV['CLAUDE_API_KEY'].
+#
+# Usage:
+#   ClaudeService.chat("message")          → Agentic chat with tool_runner
+#   ClaudeService.generate_scorecard(loc)  → Direct generation
+#   ClaudeService.recommend(requirements)  → Agentic recommendation

@@ -37,10 +37,23 @@ module Api
           mode: 'payment',
           success_url: ENV['STRIPE_SUCCESS_URL'] || "#{origin}/success?session_id={CHECKOUT_SESSION_ID}",
           cancel_url: ENV['STRIPE_CANCEL_URL'] || "#{origin}/cancel",
+          customer_email: params[:email].presence,
           metadata: {
             location_id: params[:location_id],
+            customer_id: customer_id,
             user_email: params[:email] || 'guest@orbital.local'
           }
+        )
+
+        # Record pending payment
+        BlueprintPayment.create!(
+          location_id: params[:location_id],
+          customer_id: customer_id,
+          stripe_session_id: session.id,
+          customer_email: params[:email],
+          amount_cents: blueprint_price_cents,
+          currency: 'usd',
+          status: 'pending'
         )
 
         render json: {
@@ -85,7 +98,30 @@ module Api
       end
     end
 
+    # GET /api/payments/check?location_id=X&customer_id=Y
+    # Check if blueprint has been purchased
+    def check_blueprint_payment
+      unless params[:location_id].present?
+        return render json: { error: 'location_id required' }, status: :bad_request
+      end
+
+      paid = BlueprintPayment.paid_for?(
+        customer_id: customer_id,
+        location_id: params[:location_id]
+      )
+
+      render json: {
+        paid: paid,
+        location_id: params[:location_id],
+        customer_id: customer_id
+      }
+    end
+
     private
+
+    def customer_id
+      params[:customer_id] || request.headers['X-Customer-ID'] || 'anonymous'
+    end
 
     def origin
       request.base_url

@@ -9,12 +9,14 @@ demo_file = Rails.root.join('data', 'demo-inventory.json')
 if File.exist?(demo_file)
   demo_data = JSON.parse(File.read(demo_file), symbolize_names: true)
 
-  # Clear existing data (comment out if you want to preserve)
-  # Inventory.delete_all
-
-  demo_data.each do |item|
-    Inventory.create!(item)
-    puts "✓ Created: #{item[:name]}"
+  # Skip seeding if data already exists
+  if Inventory.any?
+    puts "⚠ Inventory already seeded (#{Inventory.count} items), skipping"
+  else
+    demo_data.each do |item|
+      Inventory.create!(item)
+      puts "✓ Created: #{item[:name]}"
+    end
   end
 
   puts "\n✓ Seeded #{Inventory.count} inventory items"

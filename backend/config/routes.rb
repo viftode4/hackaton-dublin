@@ -18,6 +18,10 @@ Rails.application.routes.draw do
     # Payments (Stripe)
     post 'payments/checkout', to: 'payments#checkout'
     get 'payments/session/:session_id', to: 'payments#session_status'
+    get 'payments/check', to: 'payments#check_blueprint_payment'
+
+    # Webhooks (Stripe)
+    post 'webhooks/stripe', to: 'webhooks#stripe'
 
     # Portfolio analytics
     get 'portfolio/stats', to: 'portfolio#stats'
@@ -25,6 +29,13 @@ Rails.application.routes.draw do
     # Blockchain
     post 'solana/mint', to: 'solana#mint'
   end
+
+  # Stripe redirect pages (temporary — frontend will handle these)
+  get 'success', to: proc { |_env|
+    session_id = Rack::Utils.parse_query(_env['QUERY_STRING'])['session_id']
+    [200, { 'Content-Type' => 'text/html' }, ["<html><body style='font-family:sans-serif;text-align:center;padding:60px'><h1>Payment Successful!</h1><p>Session: #{session_id}</p><p>Your blueprint is now unlocked.</p></body></html>"]]
+  }
+  get 'cancel', to: proc { [200, { 'Content-Type' => 'text/html' }, ['<html><body style="font-family:sans-serif;text-align:center;padding:60px"><h1>Payment Cancelled</h1><p>No charge was made.</p></body></html>']] }
 
   # Health check (for deployment monitoring)
   get 'health', to: proc { [200, {}, ['OK']] }

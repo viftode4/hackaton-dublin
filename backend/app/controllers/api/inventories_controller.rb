@@ -7,7 +7,7 @@ module Api
     # GET /api/inventories
     def index
       @inventories = Inventory.all
-      @inventories = @inventories.by_body(params[:body]) if params[:body].present?
+      @inventories = @inventories.where(location_id: LocationService.by_body(params[:body]).map { |l| l[:id] }) if params[:body].present?
       render json: @inventories
     end
 

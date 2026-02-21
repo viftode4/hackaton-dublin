@@ -5,13 +5,20 @@ services:
     build: .
     container_name: orbital-atlas-backend
     ports:
-      - "3000:3000"
+      - "3002:3000"
     volumes:
       - .:/app
       - bundle:/usr/local/bundle
     environment:
       - RAILS_ENV=development
       - DATABASE_URL=sqlite3:///app/db/development.sqlite3
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-20250514}
+      - SOLANA_SERVICE_URL=http://host.docker.internal:3001
+      - SOLANA_MOCK=${SOLANA_MOCK:-}
+      - PAID_API_KEY=${PAID_API_KEY:-}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
     command: rails server -b 0.0.0.0
     stdin_open: true
     tty: true
