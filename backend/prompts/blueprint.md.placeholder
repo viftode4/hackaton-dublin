@@ -1,0 +1,7 @@
+# Blueprint Prompt
+# P2 will populate this with the Claude system prompt for blueprint generation
+#
+# This prompt should instruct Claude to:
+# - Generate detailed, realistic blueprint for data center construction
+# - Include phases, timelines, costs, power strategy, cooling design, network
+# - Return valid JSON output

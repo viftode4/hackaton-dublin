@@ -1,0 +1,16 @@
+# Placeholder for demo inventory
+# P2 will populate this with sample data centers
+#
+# Expected format:
+# [
+#   {
+#     "location_id": "ashley-virginia",
+#     "name": "AcmeCorp US-East-1",
+#     "capacity_mw": 200,
+#     "workload_types": ["cloud services", "AI inference"],
+#     "utilization_pct": 85,
+#     "carbon_footprint_tons": 45000,
+#     "power_source": "grid (40% fossil)",
+#     "monthly_cost": 2800000
+#   }
+# ]

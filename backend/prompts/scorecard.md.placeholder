@@ -1,0 +1,8 @@
+# Scorecard Prompt
+# P2 will populate this with the Claude system prompt for scorecard generation
+#
+# This prompt should instruct Claude to:
+# - Analyze location data with the user's portfolio context
+# - Generate scores for: cost, power, cooling, latency, carbon, risk (0-100)
+# - Provide overall grade (A-F)
+# - Return valid JSON output

@@ -1,0 +1,38 @@
+source "https://rubygems.org"
+git_source(:github) { |repo| "https://github.com/#{repo}.git" }
+
+ruby "4.0.1"
+
+# Rails
+gem "rails", "~> 7.1.0"
+gem "puma", "~> 6.0"
+
+# Database
+# gem "pg", "~> 1.5"  # Use SQLite for dev to avoid native extension issues
+gem "sqlite3"
+
+# API
+gem "rack-cors"
+
+# External APIs
+# gem "anthropic-sdk"  # TODO: Verify correct gem name with P2
+gem "stripe"
+
+# Environment
+gem "dotenv-rails", groups: [:development, :test]
+
+# Serialization
+gem "active_model_serializers"
+
+# Logging (optional but useful)
+gem "rails_semantic_logger"
+
+# Development & Testing
+group :development, :test do
+  # gem "debug", platforms: %i[mri mingw x64_mingw]  # Skip debug for Windows
+  gem "pry-rails"
+end
+
+group :development do
+  # gem "web-console"  # Skip heavy dev tools
+end

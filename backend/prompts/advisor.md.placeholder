@@ -1,0 +1,8 @@
+# Advisor Prompt
+# P2 will populate this with the Claude system prompt for advisor chat
+#
+# This prompt should instruct Claude to:
+# - Act as expert data center infrastructure consultant
+# - Help users plan their global data center portfolio
+# - Reference location data and portfolio context
+# - Be concise, insightful, think like senior consultant

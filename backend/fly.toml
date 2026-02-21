@@ -1,0 +1,30 @@
+[env]
+rack_env = "production"
+rails_env = "production"
+
+[build]
+builder = "heroku"
+
+[[services]]
+protocol = "tcp"
+internal_port = 3000
+processes = ["app"]
+
+  [services.concurrency]
+  type = "connections"
+  hard_limit = 25
+  soft_limit = 20
+
+[checks]
+  [checks.release]
+    type = "release"
+    grace_period = "5s"
+    timeout = "30s"
+
+  [checks.http]
+    type = "http"
+    grace_period = "10s"
+    timeout = "5s"
+    interval = "10s"
+    method = "get"
+    path = "/health"

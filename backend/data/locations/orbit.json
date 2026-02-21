@@ -1,0 +1,42 @@
+[
+  {
+    "id": "leo-station",
+    "name": "Low Earth Orbit Station",
+    "body": "orbit",
+    "coordinates": { "lat": 0, "lng": 0 },
+    "energy_cost_kwh": 10000,
+    "energy_sources": ["solar (constant)"],
+    "carbon_intensity_gco2": 0,
+    "avg_temperature_c": -100,
+    "cooling_method": "radiative (vacuum)",
+    "cooling_cost_factor": 0,
+    "land_cost_sqm": 0,
+    "construction_cost_mw": 2000000000,
+    "latency_ms": { "earth": 50 },
+    "disaster_risk": 60,
+    "political_stability": 75,
+    "regulatory": "International Space Law, debris management",
+    "connectivity": ["Global satellite constellation"],
+    "special_factors": ["Continuous solar power", "vacuum cooling", "zero-g manufacturing", "high launch costs", "limited lifetime"]
+  },
+  {
+    "id": "geo-platform",
+    "name": "Geostationary Orbit Platform",
+    "body": "orbit",
+    "coordinates": { "lat": 0, "lng": 0 },
+    "energy_cost_kwh": 12000,
+    "energy_sources": ["solar"],
+    "carbon_intensity_gco2": 0,
+    "avg_temperature_c": -120,
+    "cooling_method": "radiative (vacuum)",
+    "cooling_cost_factor": 0,
+    "land_cost_sqm": 0,
+    "construction_cost_mw": 5000000000,
+    "latency_ms": { "earth": 120 },
+    "disaster_risk": 50,
+    "political_stability": 80,
+    "regulatory": "International Space Law, fixed position",
+    "connectivity": ["Fixed orbital position", "global coverage"],
+    "special_factors": ["Fixed position advantage", "extreme altitude", "limited bandwidth", "astronomical launch costs"]
+  }
+]

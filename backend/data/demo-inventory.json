@@ -1,0 +1,52 @@
+[
+  {
+    "location_id": "ashburn-virginia",
+    "name": "AcmeCorp US-East-1",
+    "capacity_mw": 200,
+    "workload_types": ["cloud services", "AI inference"],
+    "utilization_pct": 85,
+    "carbon_footprint_tons": 45000,
+    "power_source": "grid (40% fossil)",
+    "monthly_cost": 2800000
+  },
+  {
+    "location_id": "dublin-ireland",
+    "name": "AcmeCorp EU-West-1",
+    "capacity_mw": 80,
+    "workload_types": ["cloud services", "GDPR storage"],
+    "utilization_pct": 72,
+    "carbon_footprint_tons": 8500,
+    "power_source": "grid (60% wind)",
+    "monthly_cost": 1200000
+  },
+  {
+    "location_id": "singapore",
+    "name": "AcmeCorp APAC-1",
+    "capacity_mw": 120,
+    "workload_types": ["AI inference", "CDN edge"],
+    "utilization_pct": 90,
+    "carbon_footprint_tons": 35000,
+    "power_source": "grid (95% natural gas)",
+    "monthly_cost": 2100000
+  },
+  {
+    "location_id": "iceland-reykjavik",
+    "name": "AcmeCorp Green-1",
+    "capacity_mw": 50,
+    "workload_types": ["AI training", "batch processing"],
+    "utilization_pct": 65,
+    "carbon_footprint_tons": 120,
+    "power_source": "geothermal",
+    "monthly_cost": 450000
+  },
+  {
+    "location_id": "sydney-australia",
+    "name": "AcmeCorp APAC-2",
+    "capacity_mw": 60,
+    "workload_types": ["CDN edge", "cloud services"],
+    "utilization_pct": 55,
+    "carbon_footprint_tons": 5200,
+    "power_source": "grid (75% renewable)",
+    "monthly_cost": 680000
+  }
+]

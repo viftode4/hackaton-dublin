@@ -1,0 +1,43 @@
+# Environment
+.env
+.env.local
+
+# Ruby
+*.gem
+*.rbc
+/.config
+/coverage/
+/InstalledFiles
+/pkg/
+/spec/reports/
+/spec/tmp/
+**/*.o
+**/*.a
+mkmf.log
+*.swp
+*.swo
+*~
+
+# Rails
+*.log
+/log/*
+!/log/.keep
+/tmp
+/db/*.sqlite3
+/db/*.sqlite3-journal
+/public/packs
+/public/packs-test
+/node_modules
+yarn-error.log
+.yarn-integrity
+
+# IDEs
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+
+# Test coverage
+/coverage
+htmlcov/

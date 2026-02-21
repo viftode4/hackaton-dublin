@@ -1,0 +1,8 @@
+# Recommend Prompt
+# P2 will populate this with the Claude system prompt for recommendations
+#
+# This prompt should instruct Claude to:
+# - Analyze user requirements vs current portfolio
+# - Recommend top 3 locations
+# - Provide match score, reasoning, and trade-offs
+# - Return valid JSON output

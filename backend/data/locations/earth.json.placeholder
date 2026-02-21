@@ -1,0 +1,14 @@
+# Placeholder for Earth locations
+# P2 will populate this with actual location data
+#
+# Expected format:
+# [
+#   {
+#     "id": "location-id",
+#     "name": "Location Name",
+#     "body": "earth",
+#     "coordinates": { "lat": 0, "lng": 0 },
+#     "energy_cost_kwh": 0.05,
+#     ...
+#   }
+# ]
