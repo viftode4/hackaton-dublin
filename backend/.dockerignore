@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env.local
+*.log
+node_modules
+tmp
+db/*.sqlite3
+db/*.sqlite3-journal
+.DS_Store
+.vscode
+.idea
+coverage
+public/packs
+public/packs-test

@@ -4,7 +4,6 @@ module Api
   class PaymentsController < ApplicationController
     # POST /api/payments/checkout
     # Create a Stripe checkout session for blueprint purchase
-    # TODO: Implement full Stripe integration
     def checkout
       unless params[:location_id].present? && params[:location_name].present?
         return render json: {
@@ -12,26 +11,84 @@ module Api
         }, status: :bad_request
       end
 
-      # TODO: Call Stripe API to create session
-      # For now, return placeholder
+      begin
+        # Blueprint purchase price (in cents)
+        blueprint_price_cents = 29900  # $299.00
 
-      render json: {
-        checkout_url: "https://checkout.stripe.com/placeholder",
-        session_id: "sess_placeholder"
-      }
+        # Create Stripe checkout session
+        session = Stripe::Checkout::Session.create(
+          payment_method_types: ['card'],
+          line_items: [
+            {
+              price_data: {
+                currency: 'usd',
+                product_data: {
+                  name: "Data Center Feasibility Blueprint",
+                  description: "Comprehensive blueprint for #{params[:location_name]} (#{params[:location_id]})",
+                  metadata: {
+                    location_id: params[:location_id]
+                  }
+                },
+                unit_amount: blueprint_price_cents
+              },
+              quantity: 1
+            }
+          ],
+          mode: 'payment',
+          success_url: ENV['STRIPE_SUCCESS_URL'] || "#{origin}/success?session_id={CHECKOUT_SESSION_ID}",
+          cancel_url: ENV['STRIPE_CANCEL_URL'] || "#{origin}/cancel",
+          metadata: {
+            location_id: params[:location_id],
+            user_email: params[:email] || 'guest@orbital.local'
+          }
+        )
+
+        render json: {
+          checkout_url: session.url,
+          session_id: session.id,
+          amount_cents: blueprint_price_cents,
+          currency: 'usd'
+        }
+      rescue Stripe::Error => e
+        Rails.logger.error("Stripe error: #{e.message}")
+        render json: {
+          error: "Payment processing failed: #{e.message}"
+        }, status: :unprocessable_entity
+      end
     end
 
     # GET /api/payments/session/:session_id
     # Check payment status
-    # TODO: Implement full Stripe integration
     def session_status
-      # TODO: Call Stripe API to get session status
+      begin
+        session = Stripe::Checkout::Session.retrieve(params[:session_id])
 
-      render json: {
-        status: "unpaid",
-        customer_email: nil,
-        location_id: params[:session_id]
-      }
+        render json: {
+          status: session.payment_status,
+          customer_email: session.customer_email,
+          amount_total: session.amount_total,
+          amount_subtotal: session.amount_subtotal,
+          currency: session.currency,
+          location_id: session.metadata&.dig('location_id'),
+          paid: session.payment_status == 'paid'
+        }
+      rescue Stripe::InvalidRequestError => e
+        Rails.logger.error("Stripe session not found: #{e.message}")
+        render json: {
+          error: "Session not found: #{params[:session_id]}"
+        }, status: :not_found
+      rescue Stripe::Error => e
+        Rails.logger.error("Stripe error: #{e.message}")
+        render json: {
+          error: "Payment lookup failed: #{e.message}"
+        }, status: :unprocessable_entity
+      end
+    end
+
+    private
+
+    def origin
+      request.base_url
     end
   end
 end

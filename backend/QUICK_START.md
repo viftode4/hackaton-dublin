@@ -4,6 +4,30 @@
 
 ---
 
+## Get Running (20 minutes - Docker Route - FASTEST)
+
+```bash
+# 1. Install Docker Desktop (if not already installed)
+# Windows: https://docs.docker.com/desktop/install/windows-install/
+# macOS: https://docs.docker.com/desktop/install/mac-install/
+
+# 2. In project backend directory:
+cd backend
+
+# 3. Build and run
+docker-compose build  # ~10-15 min (first time)
+docker-compose up     # ~5 min
+
+# 4. In another terminal, seed database:
+docker-compose exec backend rails db:seed
+
+# 5. Backend running on http://localhost:3000
+```
+
+Done! No Ruby install needed. All dependencies isolated in container.
+
+---
+
 ## Get Running (5 minutes - WSL2 Route)
 
 ```powershell
@@ -115,3 +139,15 @@ curl -X POST http://localhost:3000/api/inventories \
 ---
 
 See **STATUS.md** for full details.
+
+---
+
+## Which Route to Choose?
+
+| Route | Time | Requires | Best For |
+|-------|------|----------|----------|
+| **Docker** | 20 min | Docker Desktop | Windows, macOS, Linux (all same) |
+| **WSL2** | 20 min | Windows only | Windows users who want native feel |
+| **Local Ruby** | 30+ min | Ruby 4.0+ + build tools | macOS/Linux with existing setup |
+
+**Recommendation: Docker.** Cleanest, fastest, works everywhere identically.
