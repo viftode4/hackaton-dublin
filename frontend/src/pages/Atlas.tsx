@@ -557,15 +557,6 @@ export default function Atlas() {
               </div>
             </div>
           )}
-          {celestialBody === 'orbit' && (
-            <div className="absolute bottom-4 left-4 bg-card/80 backdrop-blur-sm rounded-lg p-3 text-[10px] space-y-1.5 max-w-[180px]">
-              <p className="text-foreground font-semibold text-xs">Carbon Score</p>
-              <div className="h-2 w-full rounded" style={{ background: 'linear-gradient(to right, hsl(120,80%,55%), hsl(60,80%,55%), hsl(0,80%,55%))' }} />
-              <div className="flex justify-between text-muted-foreground">
-                <span>Low (Clean)</span><span>High</span>
-              </div>
-            </div>
-          )}
           {celestialBody === 'moon' && (
             <div className="absolute bottom-4 left-4 bg-black/90 backdrop-blur-sm border border-white/10 rounded-lg p-3.5 text-[11px] space-y-2 max-w-[200px]">
               <p className="text-white font-semibold text-xs">Lunar Features</p>

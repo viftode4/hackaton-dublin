@@ -202,9 +202,9 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     if (celestialBody === 'orbit') {
       const clusters = clusterSatellites(filteredSatellites);
       return clusters.map(c => ({
-        lat: c.lat, lng: c.lng, alt: 0.08,
+        lat: c.lat, lng: c.lng, alt: 0.01,
         color: c.color,
-        radius: c.count > 5 ? 0.6 : c.count > 1 ? 0.4 : 0.25,
+        radius: c.count > 10 ? 1.0 : c.count > 3 ? 0.7 : 0.4,
         label: c.count > 1
           ? `<b>${c.count} satellites</b><br/>${CATEGORY_LABELS[c.dominantCategory]}`
           : `<b>${c.satellites[0].name}</b><br/>Alt: ${c.satellites[0].altitudeKm?.toLocaleString()} km`,
@@ -426,11 +426,15 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       const yV = e.clientY - cvRect.top;
       const xS = scRect ? e.clientX - scRect.left : -1;
       const yS = scRect ? e.clientY - scRect.top : -1;
-      const rCanvas = globeRef.current.toGlobeCoords(xV, yV);
-      const rContainer = globeRef.current.toGlobeCoords(xC, yC);
-      const rScene = xS >= 0 ? globeRef.current.toGlobeCoords(xS, yS) : null;
+      const dpr = window.devicePixelRatio || 1;
+      const xDPR = xV * dpr;
+      const yDPR = yV * dpr;
+      const globeW = (globeRef.current as any).width?.() ?? '?';
+      const globeH = (globeRef.current as any).height?.() ?? '?';
+      const rCSS = globeRef.current.toGlobeCoords(xV, yV);
+      const rDPR = globeRef.current.toGlobeCoords(xDPR, yDPR);
       // eslint-disable-next-line no-console
-      console.log('=== GLOBE CLICK DEBUG ===', { mouse: [e.clientX, e.clientY], ctrRect: { l: ctrRect.left, t: ctrRect.top, w: ctrRect.width, h: ctrRect.height }, cvRect: { l: cvRect.left, t: cvRect.top, w: cvRect.width, h: cvRect.height }, scRect: scRect ? { l: scRect.left, t: scRect.top, w: scRect.width, h: scRect.height } : null, scTag: scEl?.tagName, scClass: scEl?.className, canvasRel: [xV, yV], containerRel: [xC, yC], sceneRel: [xS, yS], rCanvas, rContainer, rScene, canvasPx: [canvas.width, canvas.height], canvasCSS: [canvas.style.width, canvas.style.height] });
+      console.log('=== GLOBE CLICK DEBUG ===', { mouse: [e.clientX, e.clientY], dpr, globeW, globeH, cssCoords: [xV, yV], dprCoords: [xDPR, yDPR], rCSS, rDPR, canvasPx: [canvas.width, canvas.height], canvasCSS: [canvas.style.width, canvas.style.height] });
       const prev = document.getElementById('gdb');
       if (prev) prev.remove();
       const d = document.createElement('div');
@@ -438,11 +442,11 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       d.style.cssText = 'position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.92);color:#0f0;padding:12px;font:11px/1.5 monospace;z-index:99999;border-radius:8px;white-space:pre;';
       const ff = (n: number) => n.toFixed(1);
       const gc = (c: { lat: number; lng: number } | null) => c ? `${c.lat.toFixed(2)}, ${c.lng.toFixed(2)}` : 'null';
-      d.textContent = `Mouse: ${e.clientX}, ${e.clientY}\n\nContainer: L=${ff(ctrRect.left)} T=${ff(ctrRect.top)} ${ff(ctrRect.width)}x${ff(ctrRect.height)}\nCanvas:    L=${ff(cvRect.left)} T=${ff(cvRect.top)} ${ff(cvRect.width)}x${ff(cvRect.height)}\nScene:     L=${scRect ? ff(scRect.left) : '?'} T=${scRect ? ff(scRect.top) : '?'} ${scRect ? ff(scRect.width) : '?'}x${scRect ? ff(scRect.height) : '?'}\nScene: <${scEl?.tagName}> class="${scEl?.className}"\n\nRel container: ${ff(xC)}, ${ff(yC)}\nRel canvas:    ${ff(xV)}, ${ff(yV)}\nRel scene:     ${ff(xS)}, ${ff(yS)}\n\nGlobe(canvas):    ${gc(rCanvas)}\nGlobe(container): ${gc(rContainer)}\nGlobe(scene):     ${gc(rScene)}\n\nCanvas px: ${canvas.width}x${canvas.height}\nCSS: ${canvas.style.width} ${canvas.style.height}`;
+      d.textContent = `Mouse: ${e.clientX}, ${e.clientY}  DPR: ${dpr}\n\nGlobe internal W: ${globeW}  H: ${globeH}\nCanvas px: ${canvas.width}x${canvas.height}\nCSS: ${canvas.style.width} ${canvas.style.height}\n\nCSS coords: ${ff(xV)}, ${ff(yV)}\nDPR coords: ${ff(xDPR)}, ${ff(yDPR)}\n\nGlobe(CSS):  ${gc(rCSS)}  <-- current\nGlobe(DPR):  ${gc(rDPR)}  <-- DPR-scaled\n\nIf DPR pin is more accurate, we need DPR fix`;
       document.body.appendChild(d);
-      setTimeout(() => d.remove(), 8000);
-      if (rCanvas) {
-        handleGlobeClickRef.current(rCanvas.lat, rCanvas.lng);
+      setTimeout(() => d.remove(), 10000);
+      if (rCSS) {
+        handleGlobeClickRef.current(rCSS.lat, rCSS.lng);
       }
     };
     el.addEventListener('click', handler);
@@ -467,14 +471,17 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       return els;
     }
     if (celestialBody === 'orbit') {
-      if (camera.altitude > 1.8) return [];
+      if (camera.altitude > 3.0) return [];
+      // At default zoom (~2.5), show up to 80 satellite icons in wide viewport
+      const viewRange = camera.altitude > 2.0 ? 70 : 40;
+      const maxIcons = camera.altitude > 2.0 ? 80 : 60;
       return filteredSatellites
         .filter(s => {
           const dLat = Math.abs(s.lat - camera.lat);
           const dLng = Math.abs(((s.lng - camera.lng + 540) % 360) - 180);
-          return dLat < 40 && dLng < 40;
+          return dLat < viewRange && dLng < viewRange;
         })
-        .slice(0, 60)
+        .slice(0, maxIcons)
         .map(s => ({
           lat: s.lat, lng: s.lng, alt: s.altitude + 0.01,
           id: s.id, name: s.name, carbon: s.carbonScore, loc: s.status,
