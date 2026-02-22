@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
-import { GROUND_REGIONS, INITIAL_SATELLITES, updateSatellitePosition, type GroundRegion, type SatelliteData } from '@/lib/constants';
+import { GROUND_REGIONS, INITIAL_SATELLITES, updateSatellitePosition, getCarbonScoreColor, type GroundRegion, type SatelliteData } from '@/lib/constants';
+import { fetchTLEGroup, computePosition, computeOrbitalMetrics, CURATED_SATELLITE_IDS } from '@/lib/tle-service';
 import GlobeView from '@/components/GlobeView';
 import Sidebar from '@/components/Sidebar';
 import TopNav, { type AppTab } from '@/components/TopNav';
@@ -8,8 +9,14 @@ import ScorecardPanel from '@/components/ScorecardPanel';
 import InventoryPanel, { type InventoryItem } from '@/components/InventoryPanel';
 import ComparePanel, { type CompareLocation } from '@/components/ComparePanel';
 import AddLocationPanel, { type NewLocationData } from '@/components/AddLocationPanel';
+import CountryCard from '@/components/CountryCard';
+import LocationDetailCard, { type LocationDetail } from '@/components/LocationDetailCard';
+import { type DataLayers } from '@/components/GlobeView';
 import { type CelestialBody, type ExtraterrestrialLocation } from '@/lib/celestial';
+import type { CO2Estimate } from '@/lib/co2-api';
+import { estimateCO2 } from '@/lib/co2-api';
 import { getLocations, getInventories, createInventory, deleteInventory, mintToSolana, type BackendLocation } from '@/lib/api';
+import { loadPowerPlantLOD, loadDataCenters, type PowerPlantLOD, type DataCenter } from '@/lib/geo-data';
 import { useAuth } from '@/lib/auth';
 
 /** Map a backend location (body=earth) to a GroundRegion for the globe. */
@@ -26,6 +33,12 @@ function toGroundRegion(loc: BackendLocation): GroundRegion {
     lng: loc.coordinates.lng,
     baseCarbonIntensity: loc.carbon_intensity_gco2,
     carbonIntensity: loc.carbon_intensity_gco2,
+    energyCostKwh: loc.energy_cost_kwh,
+    landCostSqm: loc.land_cost_sqm,
+    constructionCostMw: loc.construction_cost_mw,
+    coolingCostFactor: loc.cooling_cost_factor,
+    disasterRisk: loc.disaster_risk,
+    politicalStability: loc.political_stability,
   };
 }
 
@@ -67,6 +80,17 @@ export default function Atlas() {
     id: string; name: string; body: string; carbon: number;
   } | null>(null);
   const [mintingId, setMintingId] = useState<string | null>(null);
+  const [dataLayers, setDataLayers] = useState<DataLayers>({ heatmap: true, powerPlants: false, datacenters: false });
+  const [selectedLocation, setSelectedLocation] = useState<LocationDetail | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<{
+    name: string; lat: number; lng: number; co2?: CO2Estimate;
+  } | null>(null);
+  // Candidates added to compare — persists after selectedCountry is dismissed
+  const [candidateCountries, setCandidateCountries] = useState<CompareLocation[]>([]);
+
+  // GeoJSON data layers
+  const [powerPlantLOD, setPowerPlantLOD] = useState<PowerPlantLOD | null>(null);
+  const [globalDatacenters, setGlobalDatacenters] = useState<DataCenter[]>([]);
 
   // Map of all backend locations for enriching inventory items
   const locationsRef = useRef<Map<string, BackendLocation>>(new Map());
@@ -119,6 +143,78 @@ export default function Atlas() {
       });
   }, []);
 
+  // Fetch real TLE satellite data
+  useEffect(() => {
+    async function loadTLEData() {
+      try {
+        const tles = await fetchTLEGroup('stations');
+        // Also try to get active satellites for non-station ones
+        let activeTles: typeof tles = [];
+        try { activeTles = await fetchTLEGroup('active'); } catch { /* ok */ }
+
+        const allTles = [...tles, ...activeTles];
+        const now = new Date();
+        const realSatellites: SatelliteData[] = [];
+
+        for (const [key, noradId] of Object.entries(CURATED_SATELLITE_IDS)) {
+          const tle = allTles.find(t => t.NORAD_CAT_ID === noradId);
+          if (!tle) continue;
+
+          const pos = computePosition(tle, now);
+          if (!pos) continue;
+
+          const metrics = computeOrbitalMetrics(tle);
+
+          // Carbon score: inversely proportional to power availability
+          // Higher power = lower carbon score = greener
+          const carbonScore = Math.round(Math.max(50, 250 - metrics.powerAvailabilityW / 2));
+
+          realSatellites.push({
+            id: key,
+            name: tle.OBJECT_NAME,
+            noradId,
+            inclination: metrics.inclinationDeg,
+            period: metrics.periodMinutes * 60,
+            startLat: pos.lat,
+            startLng: pos.lng,
+            phase: 0,
+            altitude: Math.min(pos.altitude / 6371 * 0.3, 0.5),
+            altitudeKm: Math.round(pos.altitude),
+            status: metrics.radiationLevel === 'low' ? 'OPTIMAL'
+              : metrics.radiationLevel === 'moderate' ? 'CAUTION'
+              : 'HIGH RADIATION',
+            color: getCarbonScoreColor(carbonScore),
+            carbonScore,
+            isStationary: metrics.periodMinutes > 1400,
+            lat: pos.lat,
+            lng: pos.lng,
+            eclipseFraction: metrics.eclipseFraction,
+            radiationLevel: metrics.radiationLevel,
+            powerAvailabilityW: metrics.powerAvailabilityW,
+            latencyMs: metrics.latencyToGroundMs,
+            apogeeKm: metrics.apogeeKm,
+            perigeeKm: metrics.perigeeKm,
+          });
+        }
+
+        if (realSatellites.length > 0) {
+          console.log(`Loaded ${realSatellites.length} real satellites from TLE data`);
+          setSatellites(realSatellites);
+        }
+      } catch (err) {
+        console.warn('TLE fetch failed, using hardcoded satellites:', err);
+        // Keep INITIAL_SATELLITES as fallback
+      }
+    }
+    loadTLEData();
+  }, []);
+
+  // Load GeoJSON data layers (power plants + global datacenters)
+  useEffect(() => {
+    loadPowerPlantLOD().then(setPowerPlantLOD).catch(() => {});
+    loadDataCenters().then(setGlobalDatacenters).catch(() => {});
+  }, []);
+
   // Carbon fluctuation every 10s
   useEffect(() => {
     const interval = setInterval(() => {
@@ -167,11 +263,31 @@ export default function Atlas() {
         locs.push({ id: m.id, name: `${m.name} (${m.location})`, body: 'mars', region: 'mars', carbon: m.carbonIntensity, location: m.location });
       }
     }
+    // Include candidate countries that were added to compare
+    for (const c of candidateCountries) {
+      if (!locs.some(l => l.id === c.id)) {
+        locs.push(c);
+      }
+    }
     return locs;
-  }, [regions, satellites, moonLocations, marsLocations]);
+  }, [regions, satellites, moonLocations, marsLocations, candidateCountries]);
 
-  const handleLocationClick = (id: string, name: string, body: string, carbon: number) => {
-    setScorecardTarget({ id, name, body, carbon });
+  const handleLocationClick = (id: string, name: string, body: string, carbon: number, regionData?: import('@/lib/constants').GroundRegion, satData?: import('@/lib/constants').SatelliteData) => {
+    // Clear country selection when clicking a datacenter/satellite
+    setSelectedCountry(null);
+
+    const detail: LocationDetail = { id, name, body, carbon, region: regionData, satellite: satData };
+
+    // Enrich with country CO2 data for Earth locations
+    if (body === 'earth' && regionData) {
+      estimateCO2(regionData.lat, regionData.lng, regionData.location).then((co2) => {
+        setSelectedLocation({ ...detail, countryCO2: co2 });
+      }).catch(() => {
+        setSelectedLocation(detail);
+      });
+    } else {
+      setSelectedLocation(detail);
+    }
   };
 
   const handleAddToInventory = async (locationId: string, locationName: string, body: string, carbon: number) => {
@@ -309,7 +425,93 @@ export default function Atlas() {
 
     switch (activeTab) {
       case 'map':
-        return <Sidebar regions={regions} satellites={satellites} onRoutingComplete={setRoutingTarget} />;
+        return (
+          <div className="flex flex-col h-full">
+            {selectedCountry?.co2 && (
+              <div className="p-3 border-b border-border">
+                <CountryCard
+                  name={selectedCountry.name}
+                  co2={selectedCountry.co2}
+                  onAddToCompare={() => {
+                    const id = `candidate-${selectedCountry.name}`;
+                    setCandidateCountries((prev) => {
+                      if (prev.some(c => c.id === id)) return prev;
+                      return [...prev, {
+                        id,
+                        name: selectedCountry.name,
+                        body: 'earth',
+                        region: 'earth' as const,
+                        carbon: selectedCountry.co2!.co2_intensity_gco2,
+                        location: selectedCountry.name,
+                      }];
+                    });
+                    if (!compareSelected.includes(id)) {
+                      setCompareSelected((prev) => [...prev, id]);
+                    }
+                    setSelectedCountry(null);
+                    setActiveTab('compare');
+                  }}
+                  onGenerateReport={() => {
+                    setScorecardTarget({
+                      id: `candidate-${selectedCountry.name}`,
+                      name: selectedCountry.name,
+                      body: 'earth',
+                      carbon: selectedCountry.co2!.co2_intensity_gco2,
+                    });
+                  }}
+                  onDismiss={() => setSelectedCountry(null)}
+                />
+              </div>
+            )}
+            {selectedLocation && !selectedCountry?.co2 && (
+              <div className="p-3 border-b border-border">
+                <LocationDetailCard
+                  location={selectedLocation}
+                  onDismiss={() => setSelectedLocation(null)}
+                  onGenerateReport={() => {
+                    setScorecardTarget({
+                      id: selectedLocation.id,
+                      name: selectedLocation.name,
+                      body: selectedLocation.body,
+                      carbon: selectedLocation.carbon,
+                    });
+                  }}
+                  onAddToCompare={() => {
+                    const id = selectedLocation.id;
+                    setCandidateCountries((prev) => {
+                      if (prev.some(c => c.id === id)) return prev;
+                      return [...prev, {
+                        id,
+                        name: selectedLocation.name,
+                        body: selectedLocation.body,
+                        region: selectedLocation.body,
+                        carbon: selectedLocation.carbon,
+                        location: selectedLocation.region?.location ?? selectedLocation.satellite?.status ?? selectedLocation.body,
+                      }];
+                    });
+                    if (!compareSelected.includes(id)) {
+                      setCompareSelected((prev) => [...prev, id]);
+                    }
+                    setSelectedLocation(null);
+                    setActiveTab('compare');
+                  }}
+                  onAddToInventory={() => {
+                    handleAddToInventory(
+                      selectedLocation.id,
+                      selectedLocation.name,
+                      selectedLocation.body,
+                      selectedLocation.carbon,
+                    );
+                    setSelectedLocation(null);
+                  }}
+                />
+              </div>
+            )}
+            <div className="flex-1 overflow-y-auto">
+              <Sidebar regions={regions} satellites={satellites} onRoutingComplete={setRoutingTarget} />
+            </div>
+          </div>
+        );
       case 'inventory':
         return <InventoryPanel items={inventory} onRemove={handleRemoveFromInventory} onItemClick={handleInventoryClick} onMint={handleMintToSolana} mintingId={mintingId} />;
       case 'compare':
@@ -340,6 +542,17 @@ export default function Atlas() {
             zoomTarget={zoomTarget}
             moonLocations={moonLocations}
             marsLocations={marsLocations}
+            dataLayers={dataLayers}
+            onDataLayersChange={setDataLayers}
+            onCountryClick={(country) => {
+              setSelectedCountry(country);
+              setSelectedLocation(null);
+              setScorecardTarget(null);
+            }}
+            activeCountry={selectedCountry}
+            activeLocation={selectedLocation}
+            powerPlantLOD={powerPlantLOD ?? undefined}
+            globalDatacenters={globalDatacenters}
           />
 
           {/* Init overlay */}
@@ -365,6 +578,52 @@ export default function Atlas() {
               <div className="h-2 w-full rounded" style={{ background: 'linear-gradient(to right, hsl(120,80%,55%), hsl(60,80%,55%), hsl(0,80%,55%))' }} />
               <div className="flex justify-between text-muted-foreground">
                 <span>Low (Clean)</span><span>High</span>
+              </div>
+            </div>
+          )}
+          {celestialBody === 'moon' && (
+            <div className="absolute bottom-4 left-4 bg-card/80 backdrop-blur-sm rounded-lg p-3 text-[10px] space-y-1.5 max-w-[180px]">
+              <p className="text-foreground font-semibold text-xs">Lunar Features</p>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full" style={{ background: '#4488aa' }} />
+                <span className="text-muted-foreground">Maria (seas)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full" style={{ background: '#aa8844' }} />
+                <span className="text-muted-foreground">Montes (mountains)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full" style={{ background: '#888888' }} />
+                <span className="text-muted-foreground">Craters</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-sm" style={{ background: '#00e5ff', width: '8px', height: '8px', transform: 'rotate(45deg)' }} />
+                <span className="text-muted-foreground">Datacenter sites</span>
+              </div>
+            </div>
+          )}
+          {celestialBody === 'mars' && (
+            <div className="absolute bottom-4 left-4 bg-card/80 backdrop-blur-sm rounded-lg p-3 text-[10px] space-y-1.5 max-w-[180px]">
+              <p className="text-foreground font-semibold text-xs">Mars Geology</p>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-2 rounded-sm" style={{ background: 'rgba(60, 120, 200, 0.5)' }} />
+                <span className="text-muted-foreground">Amazonian (young)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-2 rounded-sm" style={{ background: 'rgba(200, 140, 60, 0.5)' }} />
+                <span className="text-muted-foreground">Hesperian (mid)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-2 rounded-sm" style={{ background: 'rgba(180, 80, 60, 0.5)' }} />
+                <span className="text-muted-foreground">Noachian (ancient)</span>
+              </div>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="w-2 h-2 rounded-full" style={{ background: '#cc6633' }} />
+                <span className="text-muted-foreground">Volcanoes</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full" style={{ background: '#4466cc' }} />
+                <span className="text-muted-foreground">Canyons/Valleys</span>
               </div>
             </div>
           )}

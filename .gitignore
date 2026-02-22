@@ -6,3 +6,4 @@ backend/db/*.sqlite3
 backend/tmp/
 backend/log/
 node_modules/
+scripts/preprocess/tmp/

@@ -2,8 +2,18 @@ import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import Globe from 'react-globe.gl';
 import { GroundRegion, SatelliteData, getIntensityColor, USER_LOCATION, updateSatellitePosition } from '@/lib/constants';
 import { CelestialBody, CELESTIAL_CONFIGS, MOON_LOCATIONS, MARS_LOCATIONS, type ExtraterrestrialLocation } from '@/lib/celestial';
+import { getCountryFeatures, getCentroid } from '@/lib/geo-countries';
+import { estimateCO2, type CO2Estimate } from '@/lib/co2-api';
+import { type PowerPlantLOD, type PowerPlantCluster, type DataCenter, getFuelColor, getProviderColor, getVisibleClusters, viewportCull, FUEL_LEGEND, PROVIDER_LEGEND } from '@/lib/geo-data';
+import { getMoonFeatures, type MoonFeature } from '@/lib/moon-data';
+import { getMarsFeatures, getMarsSolarIrradiance, getMarsDustFrequency, computeMarsFeasibility, type MarsFeature } from '@/lib/mars-data';
 import CelestialSwitcher from './CelestialSwitcher';
-import PlanarView from './PlanarView';
+
+export interface DataLayers {
+  heatmap: boolean;
+  powerPlants: boolean;
+  datacenters: boolean;
+}
 
 interface Props {
   regions: GroundRegion[];
@@ -11,10 +21,17 @@ interface Props {
   routingTarget: { lat: number; lng: number } | null;
   celestialBody: CelestialBody;
   onCelestialBodyChange: (body: CelestialBody) => void;
-  onLocationClick?: (id: string, name: string, body: string, carbon: number) => void;
+  onLocationClick?: (id: string, name: string, body: string, carbon: number, regionData?: GroundRegion, satData?: SatelliteData) => void;
   zoomTarget?: { lat: number; lng: number } | null;
   moonLocations?: ExtraterrestrialLocation[];
   marsLocations?: ExtraterrestrialLocation[];
+  dataLayers?: DataLayers;
+  onDataLayersChange?: (layers: DataLayers) => void;
+  onCountryClick?: (country: { name: string; lat: number; lng: number; co2?: CO2Estimate }) => void;
+  activeCountry?: { name: string } | null;
+  activeLocation?: { id: string } | null;
+  powerPlantLOD?: PowerPlantLOD;
+  globalDatacenters?: DataCenter[];
 }
 
 // Generate orbit trajectory points for a satellite
@@ -62,12 +79,18 @@ const SATELLITE_INFO: Record<string, { size: string; mass: string; altitudeKm: n
   'INMARSAT5': { size: '7.8m × 3.4m', mass: '6,070 kg', altitudeKm: 35786, co2: '85 g CO₂/kWh (solar only)' },
 };
 
-export default function GlobeView({ regions, satellites, routingTarget, celestialBody, onCelestialBodyChange, onLocationClick, zoomTarget, moonLocations, marsLocations }: Props) {
+export default function GlobeView({ regions, satellites, routingTarget, celestialBody, onCelestialBodyChange, onLocationClick, zoomTarget, moonLocations, marsLocations, dataLayers, onDataLayersChange, onCountryClick, activeCountry, activeLocation, powerPlantLOD, globalDatacenters }: Props) {
   const globeRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
-  const [selectedRegion, setSelectedRegion] = useState<GroundRegion | null>(null);
-  const [selectedSatellite, setSelectedSatellite] = useState<SatelliteData | null>(null);
+  const [countries, setCountries] = useState<any[]>([]);
+  const [countryCO2, setCountryCO2] = useState<Map<string, CO2Estimate>>(new Map());
+  const [clickedPin, setClickedPin] = useState<{ lat: number; lng: number; name: string; co2: number } | null>(null);
+  const [camera, setCamera] = useState({ lat: 30, lng: 0, altitude: 2.5 });
+  const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [moonFeatures, setMoonFeatures] = useState<MoonFeature[]>([]);
+  const [marsFeatures, setMarsFeatures] = useState<MarsFeature[]>([]);
+  const [marsGeology, setMarsGeology] = useState<any[]>([]);
 
   const config = CELESTIAL_CONFIGS[celestialBody];
 
@@ -97,24 +120,104 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     globeRef.current.pointOfView({ lat: zoomTarget.lat, lng: zoomTarget.lng, altitude: 1.2 }, 1000);
   }, [zoomTarget]);
 
+  useEffect(() => {
+    if (!globeRef.current || !routingTarget) return;
+    globeRef.current.pointOfView(
+      { lat: routingTarget.lat, lng: routingTarget.lng, altitude: 1.2 },
+      1000
+    );
+  }, [routingTarget]);
+
+  // Clear clicked pin when country/location is dismissed externally
+  useEffect(() => {
+    if (!activeCountry && !activeLocation) setClickedPin(null);
+  }, [activeCountry, activeLocation]);
+
+  // Load country GeoJSON when on Earth; clear clicked pin on body switch
+  useEffect(() => {
+    setClickedPin(null);
+    if (celestialBody !== 'earth') return;
+    getCountryFeatures().then(setCountries);
+  }, [celestialBody]);
+
+  // Load moon/mars features when switching to those bodies
+  useEffect(() => {
+    if (celestialBody === 'moon' && moonFeatures.length === 0) {
+      getMoonFeatures().then(setMoonFeatures);
+    }
+    if (celestialBody === 'mars' && marsFeatures.length === 0) {
+      getMarsFeatures().then(setMarsFeatures);
+      // Load geology for polygon overlay
+      fetch('/data/mars-geology.json')
+        .then(r => r.json())
+        .then(setMarsGeology)
+        .catch(() => {});
+    }
+  }, [celestialBody]);
+
+  // Batch-fetch CO2 for all countries so heatmap colors appear
+  useEffect(() => {
+    if (countries.length === 0) return;
+    Promise.all(
+      countries.map(async (c) => {
+        const centroid = getCentroid(c.geometry);
+        const co2 = await estimateCO2(centroid.lat, centroid.lng, c.properties.name);
+        return [c.properties.name, co2] as [string, CO2Estimate];
+      }),
+    ).then((entries) => {
+      setCountryCO2(new Map(entries));
+    });
+  }, [countries]);
+
   const currentLocations = useMemo(() => {
     if (celestialBody === 'moon') return moonLocations ?? MOON_LOCATIONS;
     if (celestialBody === 'mars') return marsLocations ?? MARS_LOCATIONS;
     return [];
   }, [celestialBody, moonLocations, marsLocations]);
 
-  // Points: Earth datacenters only, orbit shows nothing (uses HTML elements)
+  // Points: user's own DCs + viewport-culled power-plant clusters + viewport-culled global DCs (all WebGL)
   const pointsData = useMemo(() => {
-    if (celestialBody === 'earth') {
-      return regions.map(r => ({
-        lat: r.lat, lng: r.lng, alt: 0.01,
-        color: getIntensityColor(r.carbonIntensity),
-        radius: 0.55, label: `<b>${r.id}</b><br/>${r.carbonIntensity}g CO₂/kWh<br/>${r.location}`,
-        regionId: r.id,
-      }));
+    if (celestialBody !== 'earth') return [];
+    const pts: any[] = regions.map(r => ({
+      lat: r.lat, lng: r.lng, alt: 0.01,
+      color: getIntensityColor(r.carbonIntensity),
+      radius: 0.55, label: `<b>${r.id}</b><br/>${r.carbonIntensity}g CO₂/kWh<br/>${r.location}`,
+      regionId: r.id,
+    }));
+
+    // Power plant clusters — LOD + viewport culled
+    if (dataLayers?.powerPlants && powerPlantLOD) {
+      const visible = getVisibleClusters(powerPlantLOD, camera.lat, camera.lng, camera.altitude);
+      for (const c of visible) {
+        const sorted = Object.entries(c.fuelBreakdown).sort((a, b) => b[1] - a[1]).slice(0, 3);
+        const breakdown = sorted.map(([f, mw]) => `${f}: ${Math.round(mw).toLocaleString()} MW`).join('<br/>');
+        pts.push({
+          lat: c.lat, lng: c.lng, alt: 0.006,
+          color: getFuelColor(c.dominantFuel),
+          radius: Math.max(0.15, Math.min(0.7, c.totalCapacityMW / 50000)),
+          label: `<b>${c.count} Power Plant${c.count > 1 ? 's' : ''}</b><br/>` +
+            `${Math.round(c.totalCapacityMW).toLocaleString()} MW<br/>` +
+            `${Math.round(c.totalEmissions).toLocaleString()} tCO₂e<br/>` +
+            `<hr style="border-color:rgba(255,255,255,0.2);margin:3px 0"/>${breakdown}`,
+        });
+      }
     }
-    return [];
-  }, [regions, celestialBody]);
+
+    // Global datacenters — viewport culled, WebGL points (not HTML DOM)
+    if (dataLayers?.datacenters && globalDatacenters) {
+      const visible = viewportCull(globalDatacenters, camera.lat, camera.lng, camera.altitude);
+      for (const dc of visible) {
+        pts.push({
+          lat: dc.lat, lng: dc.lng, alt: 0.012,
+          color: getProviderColor(dc.provider),
+          radius: 0.35,
+          label: `<b>${dc.name}</b><br/>Provider: ${dc.provider.toUpperCase()}<br/>Zone: ${dc.zoneKey}`,
+        });
+      }
+    }
+
+    return pts;
+  }, [regions, celestialBody, dataLayers, powerPlantLOD, globalDatacenters, camera]);
 
   const labelsData = useMemo(() => {
     if (celestialBody === 'earth') {
@@ -125,8 +228,29 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
         size: 0.6,
       }));
     }
+    if (celestialBody === 'moon') {
+      // Show top 40 moon features as labels (by diameter)
+      return moonFeatures.slice(0, 40).map(f => ({
+        lat: f.lat, lng: f.lng, alt: 0.01,
+        text: f.name,
+        color: f.type === 'Mare' ? '#4488aa' : f.type === 'Mons' ? '#aa8844' : '#888888',
+        size: Math.min(0.8, Math.max(0.3, f.diameter_km / 500)),
+      }));
+    }
+    if (celestialBody === 'mars') {
+      // Show top 40 mars features
+      return marsFeatures.slice(0, 40).map(f => ({
+        lat: f.lat, lng: f.lng, alt: 0.01,
+        text: f.name,
+        color: f.type === 'Mons' ? '#cc6633'
+          : f.type === 'Planitia' || f.type === 'Planum' ? '#66aa44'
+          : f.type === 'Vallis' || f.type === 'Chasma' ? '#4466cc'
+          : '#aa8866',
+        size: Math.min(0.8, Math.max(0.3, f.diameter_km / 800)),
+      }));
+    }
     return [];
-  }, [regions, celestialBody]);
+  }, [regions, celestialBody, moonFeatures, marsFeatures]);
 
   // Rings: only for Earth datacenters
   const ringsData = useMemo(() => {
@@ -143,165 +267,120 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   // Orbit trajectory paths
   const pathsData = useMemo(() => [] as any[], [satellites, celestialBody]);
 
-  // Click handler
+  // Click handler — unified: stop rotation, set pin, call parent
   const handleRegionClickRef = useRef<(region: any) => void>(() => {});
   handleRegionClickRef.current = (data: any) => {
+    const c = globeRef.current?.controls();
+    if (c) c.autoRotate = false;
+
     if (celestialBody === 'earth') {
       const region = regions.find(r => r.id === data.id);
       if (region) {
-        if (globeRef.current) {
-          globeRef.current.pointOfView({ lat: region.lat, lng: region.lng, altitude: 0.8 }, 800);
-        }
-        setTimeout(() => setSelectedRegion(region), 850);
-        onLocationClick?.(region.id, region.name, 'earth', region.carbonIntensity);
+        globeRef.current?.pointOfView({ lat: region.lat, lng: region.lng, altitude: 0.8 }, 800);
+        setClickedPin({ lat: region.lat, lng: region.lng, name: region.name, co2: region.carbonIntensity });
+        onLocationClick?.(region.id, region.name, 'earth', region.carbonIntensity, region);
       }
     } else if (celestialBody === 'orbit') {
       const sat = satellites.find(s => s.id === data.id);
       if (sat) {
-        if (globeRef.current) {
-          globeRef.current.pointOfView({ lat: sat.lat, lng: sat.lng, altitude: 0.8 }, 800);
-        }
-        setTimeout(() => setSelectedSatellite(sat), 850);
-        onLocationClick?.(sat.id, sat.name, 'orbit', sat.carbonScore);
+        globeRef.current?.pointOfView({ lat: sat.lat, lng: sat.lng, altitude: 0.8 }, 800);
+        setClickedPin({ lat: sat.lat, lng: sat.lng, name: sat.name, co2: sat.carbonScore });
+        onLocationClick?.(sat.id, sat.name, 'orbit', sat.carbonScore, undefined, sat);
       }
     } else {
       const loc = currentLocations.find(l => l.id === data.id);
       if (loc) {
-        if (globeRef.current) {
-          globeRef.current.pointOfView({ lat: loc.lat, lng: loc.lng, altitude: 0.8 }, 800);
-        }
+        globeRef.current?.pointOfView({ lat: loc.lat, lng: loc.lng, altitude: 0.8 }, 800);
+        setClickedPin({ lat: loc.lat, lng: loc.lng, name: loc.name, co2: loc.carbonIntensity });
         onLocationClick?.(loc.id, loc.name, celestialBody, loc.carbonIntensity);
       }
     }
   };
 
-  // HTML elements: datacenter pins on Earth, satellite markers on orbit
+  // Polygon click handler for heatmap countries
+  const handlePolygonClick = useCallback((polygon: any, _event: MouseEvent, coords: { lat: number; lng: number }) => {
+    // Stop auto-rotation so user can examine
+    const c = globeRef.current?.controls();
+    if (c) c.autoRotate = false;
+
+    const centroid = getCentroid(polygon.geometry);
+    estimateCO2(centroid.lat, centroid.lng, polygon.properties.name).then((co2) => {
+      setCountryCO2((prev) => new Map(prev).set(polygon.properties.name, co2));
+      setClickedPin({ lat: coords.lat, lng: coords.lng, name: polygon.properties.name, co2: co2.co2_intensity_gco2 });
+      onCountryClick?.({ name: polygon.properties.name, lat: coords.lat, lng: coords.lng, co2 });
+      globeRef.current?.pointOfView({ lat: coords.lat, lng: coords.lng, altitude: 1.2 }, 1000);
+    });
+  }, [onCountryClick]);
+
+  // HTML elements: user's datacenter pins on Earth, satellite markers on orbit, plus clicked pin
   const htmlElementsData = useMemo(() => {
     if (celestialBody === 'earth') {
-      return regions.map(r => ({
+      const els: any[] = regions.map(r => ({
         lat: r.lat, lng: r.lng, alt: 0.02,
         id: r.id, name: r.id, carbon: r.carbonIntensity, loc: r.location,
-        isSatellite: false, satData: null as SatelliteData | null,
+        isSatellite: false, isClickedPin: false, satData: null as SatelliteData | null,
       }));
+      if (clickedPin) {
+        els.push({
+          lat: clickedPin.lat, lng: clickedPin.lng, alt: 0.02,
+          id: `clicked-${clickedPin.name}`, name: clickedPin.name, carbon: clickedPin.co2, loc: clickedPin.name,
+          isSatellite: false, isClickedPin: true, satData: null,
+        });
+      }
+      return els;
     }
     if (celestialBody === 'orbit') {
       return satellites.map(s => ({
         lat: s.lat, lng: s.lng, alt: s.altitude + 0.01,
         id: s.id, name: s.name, carbon: s.carbonScore, loc: s.status,
-        isSatellite: true, satData: s,
+        isSatellite: true, isClickedPin: false, satData: s,
       }));
     }
+    // Moon and Mars: render locations as pins
+    if (celestialBody === 'moon' || celestialBody === 'mars') {
+      const els: any[] = currentLocations.map(loc => ({
+        lat: loc.lat, lng: loc.lng, alt: 0.02,
+        id: loc.id, name: loc.name, carbon: loc.carbonIntensity,
+        loc: loc.location, powerSource: loc.powerSource,
+        capacity: loc.capacity, status: loc.status,
+        isSatellite: false, isClickedPin: false, isExtraterrestrial: true,
+        satData: null as SatelliteData | null,
+      }));
+      if (clickedPin) {
+        els.push({
+          lat: clickedPin.lat, lng: clickedPin.lng, alt: 0.02,
+          id: `clicked-${clickedPin.name}`, name: clickedPin.name, carbon: clickedPin.co2, loc: clickedPin.name,
+          isSatellite: false, isClickedPin: true, isExtraterrestrial: false,
+          satData: null,
+        });
+      }
+      return els;
+    }
     return [];
-  }, [regions, satellites, celestialBody]);
+  }, [regions, satellites, celestialBody, clickedPin, currentLocations]);
 
   const htmlElementFn = useCallback((d: any) => {
     if (d.isSatellite) {
       return createSatelliteElement(d, handleRegionClickRef);
     }
+    if (d.isClickedPin) {
+      return createClickedPinElement(d);
+    }
+    if (d.isExtraterrestrial) {
+      return createExtraterrestrialElement(d, handleRegionClickRef);
+    }
     return createDatacenterElement(d, handleRegionClickRef);
   }, []);
 
-  if (selectedRegion && celestialBody === 'earth') {
-    return (
-      <div ref={containerRef} className="w-full h-full relative">
-        <PlanarView
-          regions={regions}
-          satellites={satellites}
-          focusRegion={selectedRegion}
-          onBack={() => setSelectedRegion(null)}
-        />
-      </div>
-    );
-  }
+  const showHeatmap = dataLayers?.heatmap ?? true;
 
-  if (selectedSatellite && celestialBody === 'orbit') {
-    const satInfo = SATELLITE_INFO[selectedSatellite.id];
-    return (
-      <div ref={containerRef} className="w-full h-full relative bg-background overflow-hidden animate-slide-up">
-        {/* Grid background */}
-        <div className="absolute inset-0 opacity-10" style={{
-          backgroundImage: `
-            linear-gradient(hsl(var(--primary) / 0.3) 1px, transparent 1px),
-            linear-gradient(90deg, hsl(var(--primary) / 0.3) 1px, transparent 1px)
-          `,
-          backgroundSize: '60px 60px',
-        }} />
-
-        {/* Back button */}
-        <button
-          onClick={() => setSelectedSatellite(null)}
-          className="absolute top-4 left-4 z-30 flex items-center gap-2 bg-card/90 backdrop-blur-sm rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors border border-border"
-        >
-          <span className="text-base">←</span>
-          Back to Globe
-        </button>
-
-        {/* Satellite title */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-card/90 backdrop-blur-sm rounded-lg px-4 py-2 border border-border text-center">
-          <p className="text-primary font-semibold text-sm">{selectedSatellite.name}</p>
-          <p className="text-muted-foreground text-xs">{selectedSatellite.status}</p>
-        </div>
-
-        {/* Satellite detail card */}
-        <div className="absolute inset-0 flex items-center justify-center z-10">
-          <div className="bg-card/90 backdrop-blur-sm border border-border rounded-xl p-6 max-w-sm w-full mx-4 space-y-4">
-            {/* Orbit indicator */}
-            <div className="flex justify-center mb-2">
-              <div className="relative w-24 h-24">
-                <div className="absolute inset-0 rounded-full border border-primary/30" />
-                <div className="absolute inset-3 rounded-full border border-primary/20" />
-                <div className="absolute inset-6 rounded-full border border-primary/10" />
-                <div
-                  className="absolute w-3 h-3 rounded-full bg-primary shadow-lg shadow-primary/40 animate-pulse"
-                  style={{ top: '8px', left: '50%', transform: 'translateX(-50%)' }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-4 h-4 rounded-full bg-muted-foreground/20" />
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-muted/60 rounded-lg px-3 py-2">
-                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Inclination</p>
-                <p className="text-sm font-semibold text-foreground">{selectedSatellite.inclination}°</p>
-              </div>
-              <div className="bg-muted/60 rounded-lg px-3 py-2">
-                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Carbon Score</p>
-                <p className="text-sm font-semibold text-foreground">{selectedSatellite.carbonScore}</p>
-              </div>
-              {satInfo && (
-                <>
-                  <div className="bg-muted/60 rounded-lg px-3 py-2">
-                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Size</p>
-                    <p className="text-sm font-semibold text-foreground">{satInfo.size}</p>
-                  </div>
-                  <div className="bg-muted/60 rounded-lg px-3 py-2">
-                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Altitude</p>
-                    <p className="text-sm font-semibold text-foreground">{satInfo.altitudeKm.toLocaleString()} km</p>
-                  </div>
-                  <div className="bg-muted/60 rounded-lg px-3 py-2">
-                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Mass</p>
-                    <p className="text-sm font-semibold text-foreground">{satInfo.mass}</p>
-                  </div>
-                  <div className="bg-muted/60 rounded-lg px-3 py-2">
-                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Emissions</p>
-                    <p className="text-sm font-semibold text-foreground">{satInfo.co2}</p>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="text-center pt-2">
-              <p className="text-[10px] text-muted-foreground">
-                Position: {selectedSatellite.lat.toFixed(2)}°, {selectedSatellite.lng.toFixed(2)}°
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Zoom handler — debounced camera update for LOD + viewport culling
+  const handleZoom = useCallback((pov: { lat: number; lng: number; altitude: number }) => {
+    if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+    zoomTimerRef.current = setTimeout(() => {
+      setCamera({ lat: pov.lat, lng: pov.lng, altitude: pov.altitude });
+    }, 150);
+  }, []);
 
   return (
     <div ref={containerRef} className="w-full h-full relative">
@@ -315,6 +394,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
           atmosphereColor={config.atmosphereColor}
           atmosphereAltitude={config.atmosphereAltitude}
           showAtmosphere={config.showAtmosphere}
+          onZoom={handleZoom}
           pointsData={pointsData}
           pointLat="lat" pointLng="lng" pointAltitude="alt"
           pointColor="color" pointRadius="radius" pointLabel="label"
@@ -331,6 +411,39 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
           labelLat="lat" labelLng="lng" labelAltitude="alt"
           labelText="text" labelColor="color" labelSize="size"
           labelDotRadius={0.3} labelResolution={2}
+          polygonsData={
+            showHeatmap && celestialBody === 'earth' ? countries
+            : celestialBody === 'mars' ? marsGeology
+            : []
+          }
+          polygonGeoJsonGeometry={(d: any) => d.geometry}
+          polygonCapColor={(d: any) => {
+            if (celestialBody === 'mars') {
+              // Color by geologic age: Noachian (old, red) -> Hesperian (mid, orange) -> Amazonian (young, blue)
+              const age = d.properties?.age || '';
+              if (age.startsWith('lA') || age.includes('Amazonian')) return 'rgba(60, 120, 200, 0.3)';
+              if (age.startsWith('H') || age.includes('Hesperian')) return 'rgba(200, 140, 60, 0.3)';
+              if (age.startsWith('N') || age.includes('Noachian')) return 'rgba(180, 80, 60, 0.3)';
+              return 'rgba(120, 100, 80, 0.2)';
+            }
+            // Earth country heatmap (existing logic)
+            const co2 = countryCO2.get(d.properties.name);
+            if (!co2) return 'rgba(100, 100, 100, 0.15)';
+            return getIntensityColor(co2.co2_intensity_gco2) + '66';
+          }}
+          polygonSideColor={() => 'rgba(0, 0, 0, 0)'}
+          polygonStrokeColor={() => celestialBody === 'mars' ? 'rgba(200, 140, 60, 0.4)' : 'rgba(0, 212, 255, 0.3)'}
+          polygonAltitude={0.005}
+          polygonLabel={(d: any) => {
+            if (celestialBody === 'mars') {
+              const name = d.properties?.unit_name || d.properties?.age || 'Unknown';
+              const area = d.properties?.area_km2;
+              return `<b>${name}</b>${area ? `<br/>${Math.round(area).toLocaleString()} km²` : ''}`;
+            }
+            const co2 = countryCO2.get(d.properties.name);
+            return `<b>${d.properties.name}</b>${co2 ? `<br/>${co2.co2_intensity_gco2} g CO₂/kWh` : ''}`;
+          }}
+          onPolygonClick={handlePolygonClick as any}
           htmlElementsData={htmlElementsData}
           htmlLat="lat" htmlLng="lng" htmlAltitude="alt"
           htmlElement={htmlElementFn}
@@ -346,6 +459,74 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
         />
       )}
       <CelestialSwitcher active={celestialBody} onChange={onCelestialBodyChange} />
+      {celestialBody === 'earth' && dataLayers && onDataLayersChange && (
+        <div className="absolute bottom-14 right-4 z-20 bg-card/80 backdrop-blur-sm border border-border rounded-lg px-3 py-2 space-y-1.5 max-w-[200px]">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Layers</p>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={dataLayers.heatmap}
+              onChange={() => onDataLayersChange({ ...dataLayers, heatmap: !dataLayers.heatmap })}
+              className="accent-primary w-3 h-3"
+            />
+            <span className="text-xs text-foreground">CO₂ Heatmap</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={dataLayers.powerPlants}
+              onChange={() => onDataLayersChange({ ...dataLayers, powerPlants: !dataLayers.powerPlants })}
+              className="accent-primary w-3 h-3"
+            />
+            <span className="text-xs text-foreground">
+              Power Plants
+              {powerPlantLOD ? <span className="text-muted-foreground ml-1">(LOD)</span> : null}
+            </span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={dataLayers.datacenters}
+              onChange={() => onDataLayersChange({ ...dataLayers, datacenters: !dataLayers.datacenters })}
+              className="accent-primary w-3 h-3"
+            />
+            <span className="text-xs text-foreground">
+              Global Datacenters
+              {globalDatacenters ? <span className="text-muted-foreground ml-1">({globalDatacenters.length})</span> : null}
+            </span>
+          </label>
+
+          {/* Fuel type legend when power plants layer is active */}
+          {dataLayers.powerPlants && (
+            <div className="pt-1.5 border-t border-border/50 space-y-0.5">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Fuel Type</p>
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                {FUEL_LEGEND.map(([fuel, color]) => (
+                  <div key={fuel} className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                    <span className="text-[9px] text-muted-foreground capitalize">{fuel}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Provider legend when datacenters layer is active */}
+          {dataLayers.datacenters && (
+            <div className="pt-1.5 border-t border-border/50 space-y-0.5">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Provider</p>
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                {PROVIDER_LEGEND.map(([provider, color]) => (
+                  <div key={provider} className="flex items-center gap-1">
+                    <div className="w-2 h-2 rotate-45" style={{ backgroundColor: color }} />
+                    <span className="text-[9px] text-muted-foreground uppercase">{provider}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -425,12 +606,21 @@ function createSatelliteElement(d: any, clickRef: React.MutableRefObject<(data: 
   tag.style.transition = 'opacity 0.2s ease';
   tag.setAttribute('data-sat-tag', d.id);
 
+  const altKm = d.satData?.altitudeKm || info.altitudeKm || 0;
+  const power = d.satData?.powerAvailabilityW;
+  const eclipse = d.satData?.eclipseFraction;
+  const radiation = d.satData?.radiationLevel;
+  const latency = d.satData?.latencyMs;
+
   tag.innerHTML = `
     <div style="font-size:10px;font-weight:700;color:${d.satData?.color || '#00d4ff'};margin-bottom:3px;">${d.name}</div>
     <div style="font-size:8px;color:#8899aa;line-height:1.5;">
-      <span style="color:#ccd;">Alt:</span> ${info.altitudeKm.toLocaleString()} km<br/>
-      <span style="color:#ccd;">Size:</span> ${info.size}<br/>
-      <span style="color:#ccd;">CO₂:</span> ${info.co2}
+      <span style="color:#ccd;">Alt:</span> ${altKm.toLocaleString()} km<br/>
+      ${power ? `<span style="color:#ccd;">Power:</span> ${power} W/m&sup2;<br/>` : `<span style="color:#ccd;">Size:</span> ${info.size}<br/>`}
+      ${eclipse !== undefined ? `<span style="color:#ccd;">Eclipse:</span> ${(eclipse * 100).toFixed(1)}%<br/>` : ''}
+      ${radiation ? `<span style="color:#ccd;">Radiation:</span> ${radiation}<br/>` : ''}
+      ${latency !== undefined ? `<span style="color:#ccd;">Latency:</span> ${latency.toFixed(1)} ms<br/>` : ''}
+      <span style="color:#ccd;">CO&#8322;:</span> ${info.co2 || 'Solar powered'}
     </div>
   `;
 
@@ -505,3 +695,141 @@ function createDatacenterElement(d: any, clickRef: React.MutableRefObject<(data:
   el.title = `${d.name} · ${d.loc} — Click to explore`;
   return el;
 }
+
+// Create a pin for a clicked country on the heatmap
+function createClickedPinElement(d: any) {
+  const el = document.createElement('div');
+  el.style.display = 'flex';
+  el.style.flexDirection = 'column';
+  el.style.alignItems = 'center';
+  el.style.transform = 'translate(-50%, -100%)';
+  el.style.pointerEvents = 'none';
+  el.style.zIndex = '20';
+
+  const color = d.carbon > 0 ? getIntensityColor(d.carbon) : '#00d4ff';
+
+  // Pin marker
+  const pin = document.createElement('div');
+  pin.style.width = '12px';
+  pin.style.height = '12px';
+  pin.style.borderRadius = '50%';
+  pin.style.background = color;
+  pin.style.border = '2px solid #fff';
+  pin.style.boxShadow = `0 0 10px ${color}, 0 2px 8px rgba(0,0,0,0.5)`;
+
+  // Label tag
+  const tag = document.createElement('div');
+  tag.style.marginBottom = '4px';
+  tag.style.background = 'rgba(10, 14, 26, 0.92)';
+  tag.style.backdropFilter = 'blur(8px)';
+  tag.style.border = `1px solid ${color}66`;
+  tag.style.borderRadius = '6px';
+  tag.style.padding = '4px 8px';
+  tag.style.whiteSpace = 'nowrap';
+  tag.style.textAlign = 'center';
+  tag.innerHTML = `
+    <div style="font-size:11px;font-weight:700;color:#fff;">${d.name}</div>
+    <div style="font-size:9px;color:${color};margin-top:1px;">${d.carbon} g CO₂/kWh</div>
+  `;
+
+  el.appendChild(tag);
+  el.appendChild(pin);
+  return el;
+}
+
+// Create an extraterrestrial location pin (moon/mars bases)
+function createExtraterrestrialElement(d: any, clickRef: React.MutableRefObject<(data: any) => void>) {
+  const el = document.createElement('div');
+  el.style.display = 'flex';
+  el.style.flexDirection = 'column';
+  el.style.alignItems = 'center';
+  el.style.cursor = 'pointer';
+  el.style.transform = 'translate(-50%, -50%)';
+  el.style.transition = 'all 0.2s ease';
+  el.style.pointerEvents = 'auto';
+  el.style.zIndex = '10';
+
+  const accentColor = d.carbon === 0 ? '#00e5ff' : '#ff9800';
+
+  // Diamond-shaped marker
+  const marker = document.createElement('div');
+  marker.style.width = '18px';
+  marker.style.height = '18px';
+  marker.style.transform = 'rotate(45deg)';
+  marker.style.background = `linear-gradient(135deg, ${accentColor}, ${accentColor}88)`;
+  marker.style.border = `2px solid ${accentColor}`;
+  marker.style.boxShadow = `0 0 14px ${accentColor}88, 0 0 28px ${accentColor}44`;
+  marker.style.borderRadius = '3px';
+
+  // Pulsing ring
+  const ring = document.createElement('div');
+  ring.style.position = 'absolute';
+  ring.style.width = '36px';
+  ring.style.height = '36px';
+  ring.style.borderRadius = '50%';
+  ring.style.border = `1px solid ${accentColor}55`;
+  ring.style.top = '-9px';
+  ring.style.left = '-9px';
+  ring.style.animation = 'pulse 2s infinite';
+
+  const markerWrap = document.createElement('div');
+  markerWrap.style.position = 'relative';
+  markerWrap.style.display = 'flex';
+  markerWrap.style.alignItems = 'center';
+  markerWrap.style.justifyContent = 'center';
+  markerWrap.appendChild(ring);
+  markerWrap.appendChild(marker);
+
+  // Info tag (shown on hover/click)
+  const tag = document.createElement('div');
+  tag.style.marginTop = '6px';
+  tag.style.background = 'rgba(10, 14, 26, 0.92)';
+  tag.style.backdropFilter = 'blur(8px)';
+  tag.style.border = `1px solid ${accentColor}55`;
+  tag.style.borderRadius = '6px';
+  tag.style.padding = '6px 10px';
+  tag.style.whiteSpace = 'nowrap';
+  tag.style.textAlign = 'center';
+  tag.style.minWidth = '120px';
+  tag.style.display = 'none';
+  tag.style.transition = 'opacity 0.2s ease';
+  tag.setAttribute('data-et-tag', d.id);
+
+  tag.innerHTML = `
+    <div style="font-size:10px;font-weight:700;color:${accentColor};margin-bottom:3px;">${d.name}</div>
+    <div style="font-size:8px;color:#8899aa;line-height:1.5;">
+      <span style="color:#ccd;">Location:</span> ${d.loc}<br/>
+      <span style="color:#ccd;">Power:</span> ${d.powerSource || 'Solar'}<br/>
+      <span style="color:#ccd;">Capacity:</span> ${d.capacity || 'N/A'}<br/>
+      <span style="color:#ccd;">Status:</span> ${d.status || 'Planned'}
+    </div>
+  `;
+
+  el.appendChild(markerWrap);
+  el.appendChild(tag);
+
+  el.addEventListener('mouseenter', () => {
+    el.style.transform = 'translate(-50%, -50%) scale(1.2)';
+    marker.style.boxShadow = `0 0 20px ${accentColor}, 0 0 40px ${accentColor}88`;
+    tag.style.display = 'block';
+  });
+  el.addEventListener('mouseleave', () => {
+    el.style.transform = 'translate(-50%, -50%) scale(1)';
+    marker.style.boxShadow = `0 0 14px ${accentColor}88, 0 0 28px ${accentColor}44`;
+    tag.style.display = 'none';
+  });
+  el.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Hide all other tags
+    document.querySelectorAll('[data-et-tag]').forEach(t => {
+      (t as HTMLElement).style.display = 'none';
+    });
+    tag.style.display = 'block';
+    clickRef.current(d);
+  });
+
+  el.title = `${d.name} — ${d.loc} — Click to explore`;
+  return el;
+}
+

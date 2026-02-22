@@ -1,0 +1,16 @@
+{
+  "name": "orbital-atlas-preprocessing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "textures": "node download-textures.mjs",
+    "moon-features": "node convert-moon-features.mjs",
+    "mars-features": "node convert-mars-features.mjs",
+    "mars-dust": "node process-mars-dust.mjs",
+    "all": "npm run textures && npm run moon-features && npm run mars-features && npm run mars-dust"
+  },
+  "dependencies": {
+    "shapefile": "^0.6.6",
+    "adm-zip": "^0.5.16"
+  }
+}

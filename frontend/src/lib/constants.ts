@@ -6,6 +6,12 @@ export interface GroundRegion {
   lng: number;
   baseCarbonIntensity: number;
   carbonIntensity: number;
+  energyCostKwh?: number;
+  landCostSqm?: number;
+  constructionCostMw?: number;
+  coolingCostFactor?: number;
+  disasterRisk?: number;
+  politicalStability?: number;
 }
 
 export interface SatelliteData {
@@ -23,6 +29,14 @@ export interface SatelliteData {
   isStationary: boolean;
   lat: number;
   lng: number;
+  noradId?: number;
+  altitudeKm?: number;
+  eclipseFraction?: number;
+  radiationLevel?: string;
+  powerAvailabilityW?: number;
+  latencyMs?: number;
+  apogeeKm?: number;
+  perigeeKm?: number;
 }
 
 export interface RoutingResult {

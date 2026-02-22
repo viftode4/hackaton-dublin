@@ -26,8 +26,18 @@ Rails.application.routes.draw do
     # Portfolio analytics
     get 'portfolio/stats', to: 'portfolio#stats'
 
+    # CO2 Prediction (ML model)
+    post 'predict/co2', to: 'predictions#co2'
+    get  'predict/info', to: 'predictions#info'
+
     # Blockchain
     post 'solana/mint', to: 'solana#mint'
+
+    # TLE satellite data (proxied from CelesTrak)
+    get 'tle', to: 'tle#index'
+
+    # Planetary region data (moon/mars features, geology)
+    get 'planetary/:body/:dataset', to: 'planetary_data#show'
   end
 
   # Stripe redirect pages (temporary — frontend will handle these)
