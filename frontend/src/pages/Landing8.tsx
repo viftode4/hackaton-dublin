@@ -1,10 +1,10 @@
 import { Suspense, useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Rocket, ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import { useGLTF, Stars } from '@react-three/drei';
 import { EffectComposer, Bloom, ToneMapping } from '@react-three/postprocessing';
-import { KernelSize } from 'postprocessing';
+import { KernelSize, ToneMappingMode } from 'postprocessing';
 import * as THREE from 'three';
 import skylyLogo from '@/assets/skyly-logo.png';
 
@@ -33,6 +33,58 @@ useLoader.preload(THREE.TextureLoader, TEXTURES.sun);
 useLoader.preload(THREE.TextureLoader, TEXTURES.mars);
 useLoader.preload(THREE.TextureLoader, TEXTURES.moon);
 useGLTF.preload('/models/satellite.glb');
+
+/* ── Sun surface shader — animated FBM noise, white-yellow gradient ── */
+const sunVert = /* glsl */`
+  varying vec2 vUv;
+  varying vec3 vPos;
+  void main() {
+    vUv = uv;
+    vPos = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const sunFrag = /* glsl */`
+  uniform float uTime;
+  varying vec2 vUv;
+  varying vec3 vPos;
+
+  float hash(vec3 p) {
+    p = fract(p * vec3(443.8975, 397.2973, 491.1871));
+    p += dot(p.zxy, p.yxz + 19.19);
+    return fract(p.x * p.y * p.z);
+  }
+  float noise(vec3 p) {
+    vec3 i = floor(p); vec3 f = fract(p);
+    f = f*f*(3.0-2.0*f);
+    return mix(
+      mix(mix(hash(i), hash(i+vec3(1,0,0)), f.x),
+          mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x), f.y),
+      mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x),
+          mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x), f.y), f.z);
+  }
+  float fbm(vec3 p) {
+    float v = 0.0; float a = 0.5;
+    for(int i=0; i<5; i++) { v += a*noise(p); p *= 2.1; a *= 0.5; }
+    return v;
+  }
+
+  void main() {
+    vec3 p = vPos * 1.4 + uTime * vec3(0.08, 0.05, 0.03);
+    float n = fbm(p);
+    float n2 = fbm(p * 0.6 + vec3(5.2, 1.3, 0.0) + uTime * 0.04);
+    float pattern = n * 0.65 + n2 * 0.35;
+    // Sharpen contrast so transitions are crisp, not muddy
+    pattern = smoothstep(0.2, 0.8, pattern);
+
+    vec3 colA = vec3(1.8, 1.0, 0.1); // deep yellow-orange
+    vec3 colB = vec3(2.2, 2.0, 1.8); // bright white
+
+    vec3 col = mix(colA, colB, pattern);
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
 
 /* ── Rim-light shader for planet edges where light hits ── */
 const rimVertexShader = /* glsl */ `
@@ -142,7 +194,7 @@ function Planet({
   );
 }
 
-/* ── Sun — bright core, bloom handles glow ── */
+/* ── Sun — animated gradient surface, bloom glow ── */
 function Sun({
   position,
   radius,
@@ -150,15 +202,27 @@ function Sun({
   position: [number, number, number];
   radius: number;
 }) {
+  const matRef = useRef<THREE.ShaderMaterial>(null!);
+  const uniforms = useMemo(() => ({ uTime: { value: 0 } }), []);
+
+  useFrame((_, delta) => {
+    if (matRef.current) matRef.current.uniforms.uTime.value += delta;
+  });
+
   return (
     <group position={position}>
       <pointLight intensity={350} color="#fff8ee" distance={200} decay={0.8} />
       <pointLight intensity={60} color="#fff0dd" distance={200} decay={0.6} />
 
-      {/* Core — HDR bright sphere, values > 1.0 so only it exceeds bloom threshold */}
       <mesh>
-        <sphereGeometry args={[radius, 48, 48]} />
-        <meshBasicMaterial color={[3, 2.8, 2.4]} toneMapped={false} />
+        <sphereGeometry args={[radius, 64, 64]} />
+        <shaderMaterial
+          ref={matRef}
+          uniforms={uniforms}
+          vertexShader={sunVert}
+          fragmentShader={sunFrag}
+          toneMapped={false}
+        />
       </mesh>
     </group>
   );
@@ -184,7 +248,25 @@ function BlinkingSatellite({
   const pivotRef = useRef<THREE.Group>(null!);
   const satRef = useRef<THREE.Group>(null!);
   const lightRef = useRef<THREE.PointLight>(null!);
-  const clonedScene = useMemo(() => scene.clone(), [scene]);
+  const clonedScene = useMemo(() => {
+    const clone = scene.clone();
+    // Dim all materials so they stay below the bloom luminance threshold
+    clone.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        mats.forEach((m) => {
+          const mat = m as THREE.MeshStandardMaterial;
+          mat.toneMapped = true;
+          mat.emissiveIntensity = 0;
+          mat.color.multiplyScalar(0.25);
+          mat.roughness = 0.9;
+          mat.metalness = 0.1;
+        });
+      }
+    });
+    return clone;
+  }, [scene]);
 
   useFrame((state, delta) => {
     if (pivotRef.current) pivotRef.current.rotation.y += orbitSpeed * delta;
@@ -192,7 +274,7 @@ function BlinkingSatellite({
     // Neon green blink: 0.3s on, 1.7s off cycle
     if (lightRef.current) {
       const phase = (state.clock.elapsedTime + blinkOffset) % 2.0;
-      lightRef.current.intensity = phase < 0.3 ? 4 : 0;
+      lightRef.current.intensity = phase < 0.3 ? 0.8 : 0;
     }
   });
 
@@ -307,24 +389,24 @@ function OrreryScene() {
             atmosphereColor="#00aaff"
             rimColor="#88ccff"
           />
-          <BlinkingSatellite
-            orbitRadius={5.4}
-            orbitSpeed={0.3}
-            orbitTilt={0.35}
-            scale={0.05}
-            startAngle={0}
-            blinkOffset={0}
-          />
-          <BlinkingSatellite
-            orbitRadius={6.2}
-            orbitSpeed={-0.2}
-            orbitTilt={-0.5}
-            scale={0.04}
-            startAngle={Math.PI * 0.7}
-            blinkOffset={1.0}
-          />
-          <OrbitalRing radius={5.4} tiltX={-0.35 + Math.PI / 2} color="#00ff66" opacity={0.04} />
-          <OrbitalRing radius={6.2} tiltX={0.5 + Math.PI / 2} color="#00ff66" opacity={0.03} />
+          {/* Low orbit — very close to surface */}
+          <BlinkingSatellite orbitRadius={4.65} orbitSpeed={0.22}  orbitTilt={0.2}   scale={0.015} startAngle={0}              blinkOffset={0}   />
+          <BlinkingSatellite orbitRadius={4.72} orbitSpeed={-0.18} orbitTilt={-0.6}  scale={0.013} startAngle={Math.PI * 1.1}  blinkOffset={1.1} />
+          <BlinkingSatellite orbitRadius={4.8}  orbitSpeed={0.2}   orbitTilt={1.0}   scale={0.014} startAngle={Math.PI * 0.4}  blinkOffset={0.6} />
+          {/* Mid orbit */}
+          <BlinkingSatellite orbitRadius={5.2}  orbitSpeed={0.14}  orbitTilt={0.35}  scale={0.025} startAngle={0}              blinkOffset={0.3} />
+          <BlinkingSatellite orbitRadius={5.8}  orbitSpeed={-0.10} orbitTilt={-0.5}  scale={0.02}  startAngle={Math.PI * 0.7}  blinkOffset={0.8} />
+          <BlinkingSatellite orbitRadius={5.5}  orbitSpeed={-0.12} orbitTilt={-0.2}  scale={0.018} startAngle={Math.PI * 0.3}  blinkOffset={0.4} />
+          {/* High orbit */}
+          <BlinkingSatellite orbitRadius={6.4}  orbitSpeed={0.08}  orbitTilt={0.8}   scale={0.022} startAngle={Math.PI * 1.3}  blinkOffset={1.5} />
+          <BlinkingSatellite orbitRadius={7.0}  orbitSpeed={0.06}  orbitTilt={1.1}   scale={0.02}  startAngle={Math.PI * 1.8}  blinkOffset={1.2} />
+          <BlinkingSatellite orbitRadius={6.0}  orbitSpeed={-0.09} orbitTilt={-0.7}  scale={0.023} startAngle={Math.PI * 0.5}  blinkOffset={1.9} />
+          <OrbitalRing radius={4.68} tiltX={-0.2 + Math.PI / 2}  color="#00ff66" opacity={0.025} />
+          <OrbitalRing radius={4.8}  tiltX={-1.0 + Math.PI / 2}  color="#00ff66" opacity={0.02} />
+          <OrbitalRing radius={5.2}  tiltX={-0.35 + Math.PI / 2} color="#00ff66" opacity={0.02} />
+          <OrbitalRing radius={5.8}  tiltX={0.5  + Math.PI / 2}  color="#00ff66" opacity={0.015} />
+          <OrbitalRing radius={6.4}  tiltX={-0.8 + Math.PI / 2}  color="#00ff66" opacity={0.015} />
+          <OrbitalRing radius={7.0}  tiltX={-1.1 + Math.PI / 2}  color="#00ff66" opacity={0.01} />
         </group>
       </ParallaxLayer>
     </>
@@ -400,7 +482,7 @@ export default function Landing8() {
               mipmapBlur={false}
               kernelSize={KernelSize.MEDIUM}
             />
-            <ToneMapping />
+            <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
           </EffectComposer>
         </Canvas>
       </div>
@@ -409,107 +491,101 @@ export default function Landing8() {
 
       {/* Nav */}
       <header
-        className="relative z-20 flex items-center justify-between px-8 md:px-14 py-4"
+        className="relative z-20 flex items-center justify-between px-10 md:px-16 py-5"
         style={{ opacity: show ? 1 : 0, transition: 'opacity 600ms ease 100ms' }}
       >
         <div className="flex items-center gap-3">
-          <img src={skylyLogo} alt="Skyly" className="w-8 h-8 rounded-lg" />
+          <img src={skylyLogo} alt="Skyly" className="w-7 h-7 rounded-md opacity-90" />
           <span
-            className="text-[13px] font-semibold tracking-[0.22em] text-white/75"
+            className="text-[11px] font-medium tracking-[0.3em] text-white/60 uppercase"
             style={{ fontFamily: "'JetBrains Mono', monospace" }}
           >
-            SKYLY
+            Skyly
           </span>
         </div>
         <button
           onClick={() => navigate('/login')}
-          className="text-[11px] text-white/30 hover:text-white/70 transition-colors tracking-[0.18em] uppercase"
+          className="text-[10px] text-white/25 hover:text-white/60 transition-colors tracking-[0.25em] uppercase"
+          style={{ fontFamily: "'JetBrains Mono', monospace" }}
         >
           Sign In
         </button>
       </header>
 
-      {/* Hero text — difference blend makes text react to bright/dark areas */}
+      {/* Hero — shifted right to clear Earth */}
       <div
-        className="relative z-20 max-w-3xl mx-auto px-8 pt-[8vh] md:pt-[12vh] text-center pointer-events-none"
-        style={{ ...reveal(200), mixBlendMode: 'difference' }}
+        className="absolute z-20 right-[5vw] top-1/2 -translate-y-1/2 text-right pointer-events-none"
+        style={{ ...reveal(200), maxWidth: '52vw' }}
       >
         <p
-          className="text-[10px] tracking-[0.45em] text-white/40 uppercase mb-4"
+          className="text-[9px] tracking-[0.5em] text-white/30 uppercase mb-5"
           style={{ fontFamily: "'JetBrains Mono', monospace" }}
         >
           Orbital Infrastructure Platform
         </p>
         <h1
-          className="font-bold text-white leading-[1.06]"
-          style={{ fontSize: 'clamp(1.8rem, 4.5vw, 3.5rem)' }}
+          className="font-black text-white uppercase leading-[0.95] tracking-[-0.02em]"
+          style={{ fontSize: 'clamp(2.8rem, 5.5vw, 5rem)' }}
         >
-          Plan Your Next Data Center
-          <br />
-          <span className="text-white">Anywhere in the Solar System.</span>
+          Plan Your<br />Data Center<br />
+          <span className="text-white/50">Anywhere.</span>
         </h1>
-        <p className="text-[13px] text-white/30 max-w-md mx-auto leading-relaxed mt-3 mb-6">
-          AI-powered site selection across Earth, orbital stations, the Moon, and Mars.
-        </p>
-        <button
-          onClick={() => navigate('/login')}
-          className="
-            pointer-events-auto
-            inline-flex items-center gap-2 px-7 py-3 rounded-lg
-            bg-[#00e5ff] text-black font-semibold text-[13px]
-            tracking-wide hover:brightness-110 transition-all duration-300
-            hover:shadow-[0_0_40px_rgba(0,229,255,0.28)] active:scale-[0.97]
-          "
-          style={{ mixBlendMode: 'normal' }}
-        >
-          <Rocket className="w-3.5 h-3.5" />
-          Launch Skyly
-          <ArrowRight className="w-3.5 h-3.5" />
-        </button>
       </div>
 
-      {/* Stats bar */}
+      {/* CTA — bottom center */}
       <div
-        className="absolute bottom-9 left-0 right-0 z-20"
+        className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20"
+        style={{ opacity: show ? 1 : 0, transition: 'opacity 900ms ease 800ms' }}
+      >
+        <button
+          onClick={() => navigate('/login')}
+          className="group flex items-center gap-3 text-white/50 hover:text-white transition-colors duration-300"
+          style={{ fontFamily: "'JetBrains Mono', monospace" }}
+        >
+          <span className="text-[10px] tracking-[0.4em] uppercase">Launch Skyly</span>
+          <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform duration-300" />
+        </button>
+        <div className="mt-1.5 h-px bg-white/10 w-full" />
+      </div>
+
+      {/* Stats — bottom right, monochrome */}
+      <div
+        className="absolute bottom-8 right-10 md:right-16 z-20 flex gap-8 md:gap-12"
         style={{ opacity: show ? 1 : 0, transition: 'opacity 900ms ease 1200ms' }}
       >
-        <div className="flex justify-center gap-10 md:gap-16">
-          {[
-            { v: '7', l: 'Regions', c: '#3b82f6' },
-            { v: '10+', l: 'Satellites', c: '#00ff66' },
-            { v: '4', l: 'Bodies', c: '#f59e0b' },
-            { v: 'AI', l: 'Scoring', c: '#ef4444' },
-          ].map((s) => (
-            <div key={s.l} className="text-center">
-              <div
-                className="text-sm md:text-base font-bold"
-                style={{ color: s.c, fontFamily: "'JetBrains Mono', monospace" }}
-              >
-                {s.v}
-              </div>
-              <div className="text-[7px] tracking-[0.2em] uppercase" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                {s.l}
-              </div>
+        {[
+          { v: '7', l: 'Regions' },
+          { v: '9+', l: 'Satellites' },
+          { v: '4', l: 'Bodies' },
+          { v: 'AI', l: 'Scoring' },
+        ].map((s) => (
+          <div key={s.l} className="text-right">
+            <div
+              className="text-base font-bold text-white/70"
+              style={{ fontFamily: "'JetBrains Mono', monospace" }}
+            >
+              {s.v}
             </div>
-          ))}
-        </div>
+            <div className="text-[7px] tracking-[0.22em] uppercase text-white/20"
+              style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+              {s.l}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Footer */}
       <div
-        className="absolute bottom-0 left-0 right-0 z-20 py-2 px-8 md:px-14 flex items-center justify-between"
+        className="absolute bottom-0 left-0 right-0 z-20 py-2 px-10 md:px-16 flex items-center justify-between"
         style={{ opacity: show ? 1 : 0, transition: 'opacity 700ms ease 1400ms' }}
       >
         <div className="flex items-center gap-1.5">
-          <img src={skylyLogo} alt="" className="w-3.5 h-3.5 rounded" />
-          <span className="text-[8px]" style={{ color: 'rgba(255,255,255,0.15)' }}>
+          <img src={skylyLogo} alt="" className="w-3 h-3 rounded opacity-30" />
+          <span className="text-[7px] text-white/15" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
             Skyly Orbital Operations
           </span>
         </div>
-        <span
-          className="text-[7px] tracking-[0.12em]"
-          style={{ color: 'rgba(255,255,255,0.1)', fontFamily: "'JetBrains Mono', monospace" }}
-        >
+        <span className="text-[7px] tracking-[0.12em] text-white/10" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
           NASA / POLY PIZZA CC-BY
         </span>
       </div>
