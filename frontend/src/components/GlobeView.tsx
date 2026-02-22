@@ -673,9 +673,6 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
               if (age.startsWith('N') || age.includes('Noachian')) return 'rgba(180, 80, 60, 0.3)';
               return 'rgba(120, 100, 80, 0.2)';
             }
-            // When dense heatmap is active, make polygon fill transparent (heatmap layer provides color)
-            if (showHeatmap) return 'rgba(0,0,0,0)';
-            // Standard polygon fill when heatmap is off
             const co2 = countryCO2.get(d.properties.name);
             if (!co2) return 'rgba(100, 100, 100, 0.15)';
             const yr = projectionYear ?? 2025;
@@ -708,15 +705,6 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
             return `<b>${d.properties.name}</b><br/>${co2.co2_intensity_gco2} g CO₂/kWh`;
           }}
           onPolygonClick={handlePolygonClick as any}
-          heatmapsData={heatmapGridData}
-          heatmapPointLat="lat"
-          heatmapPointLng="lng"
-          heatmapPointWeight="weight"
-          heatmapBandwidth={3}
-          heatmapColorFn={heatmapColorFn}
-          heatmapColorSaturation={2.5}
-          heatmapBaseAltitude={0.006}
-          heatmapsTransitionDuration={0}
           htmlElementsData={htmlElementsData}
           htmlLat="lat" htmlLng="lng" htmlAltitude="alt"
           htmlElement={htmlElementFn}
