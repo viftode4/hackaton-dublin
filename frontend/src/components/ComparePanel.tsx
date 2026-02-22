@@ -1,7 +1,8 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo } from 'react';
 import { BarChart3, Filter, Search, X } from 'lucide-react';
-import { GROUND_REGIONS, INITIAL_SATELLITES } from '@/lib/constants';
+import { GROUND_REGIONS, INITIAL_SATELLITES, getIntensityColor } from '@/lib/constants';
 import { generateScorecard } from '@/lib/scorecard';
+import { type ScenarioId, SCENARIOS, countryDataToFeatures, predictCO2, predictCO2AtYear } from '@/lib/regression-model';
 
 export type Region = 'all' | 'earth' | 'orbit' | 'moon' | 'mars';
 
@@ -31,9 +32,11 @@ interface Props {
   selected: string[];
   onSelectedChange: (selected: string[]) => void;
   locations?: CompareLocation[];
+  projectionYear?: number;
+  scenario?: ScenarioId;
 }
 
-export default function ComparePanel({ selected, onSelectedChange, locations }: Props) {
+export default function ComparePanel({ selected, onSelectedChange, locations, projectionYear, scenario }: Props) {
   const [regionFilter, setRegionFilter] = useState<Region>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -157,6 +160,44 @@ export default function ComparePanel({ selected, onSelectedChange, locations }: 
                   </p>
                 </div>
               ))}
+            </div>
+
+            {/* ML Prediction rows */}
+            <div className="grid gap-2 items-center" style={{ gridTemplateColumns: `80px repeat(${scorecards.length}, minmax(80px, 1fr))` }}>
+              <span className="text-[10px] text-muted-foreground">CO₂ Now</span>
+              {scorecards.map(sc => {
+                const loc = allLocations.find(l => l.id === sc.locationId);
+                const ci = loc?.carbon ?? 0;
+                const features = countryDataToFeatures(ci, '40% gas, 30% coal, 20% hydro, 10% other');
+                const predicted = Math.round(predictCO2(features));
+                const color = getIntensityColor(predicted);
+                return (
+                  <div key={sc.locationId} className="rounded-lg p-1.5 text-center bg-muted">
+                    <p className="text-xs font-bold" style={{ color }}>{predicted}</p>
+                    <p className="text-[8px] text-muted-foreground">g CO₂/kWh</p>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="grid gap-2 items-center" style={{ gridTemplateColumns: `80px repeat(${scorecards.length}, minmax(80px, 1fr))` }}>
+              <span className="text-[10px] text-muted-foreground">
+                {(projectionYear ?? 2025) > 2025 ? `${projectionYear} est.` : '2050 est.'}
+              </span>
+              {scorecards.map(sc => {
+                const loc = allLocations.find(l => l.id === sc.locationId);
+                const ci = loc?.carbon ?? 0;
+                const features = countryDataToFeatures(ci, '40% gas, 30% coal, 20% hydro, 10% other');
+                const yr = (projectionYear ?? 2025) > 2025 ? projectionYear! : 2050;
+                const sc2 = scenario ?? 'net_zero';
+                const projected = Math.round(predictCO2AtYear(features, yr, SCENARIOS[sc2]));
+                const color = getIntensityColor(projected);
+                return (
+                  <div key={sc.locationId} className="rounded-lg p-1.5 text-center bg-muted">
+                    <p className="text-xs font-bold" style={{ color }}>{projected}</p>
+                    <p className="text-[8px] text-muted-foreground">g CO₂/kWh</p>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Metrics rows */}

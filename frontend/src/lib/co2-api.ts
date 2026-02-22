@@ -5,25 +5,9 @@ export interface CO2Estimate {
   confidence: number;         // 0-1
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const cache = new Map<string, CO2Estimate>();
+import { countryDataToFeatures, predictCO2 } from './regression-model';
 
-/** Parse energy mix string to extract coal% and clean% (hydro+nuclear+wind+solar+geo) as fractions. */
-function parseEnergyMix(mix: string): { pctCoal: number; pctClean: number } {
-  let coal = 0;
-  let clean = 0;
-  const parts = mix.split(',').map(s => s.trim());
-  for (const part of parts) {
-    const match = part.match(/(\d+)%\s*(.*)/);
-    if (!match) continue;
-    const pct = parseInt(match[1]) / 100;
-    const source = match[2].toLowerCase();
-    if (source.includes('coal') || source.includes('lignite')) coal += pct;
-    if (source.includes('hydro') || source.includes('nuclear') || source.includes('wind') ||
-        source.includes('solar') || source.includes('geo') || source.includes('renewable')) clean += pct;
-  }
-  return { pctCoal: coal, pctClean: clean };
-}
+const cache = new Map<string, CO2Estimate>();
 
 // Real grid carbon intensity data (g CO₂/kWh) — sources: Ember Global Electricity Review 2024, IEA
 // Energy mix and risk scores based on published national energy statistics
@@ -139,52 +123,32 @@ export async function estimateCO2(lat: number, lng: number, countryName?: string
   // Look up base data from our country table
   const baseData = countryName ? COUNTRY_DATA[countryName] : undefined;
 
-  // Try backend ML prediction if we have base country data
   if (baseData) {
-    try {
-      const { pctCoal, pctClean } = parseEnergyMix(baseData.energy_mix);
-      const res = await fetch(`${API_BASE}/api/predict/co2`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          country_ci: baseData.co2_intensity_gco2,
-          emissions_per_capacity: baseData.co2_intensity_gco2 * 5.2, // approximate t/MW proxy
-          pct_coal: pctCoal,
-          pct_clean: pctClean,
-        }),
-      });
-      if (res.ok) {
-        const prediction = await res.json();
-        const result: CO2Estimate = {
-          co2_intensity_gco2: Math.round(prediction.co2_intensity_gco2),
-          energy_mix: baseData.energy_mix,
-          risk_score: baseData.risk_score,
-          confidence: prediction.confidence ?? 0.87,
-        };
-        cache.set(key, result);
-        return result;
-      }
-    } catch {
-      // Backend unreachable — fall through to local data
-    }
-
-    // Fall back to static country data
-    cache.set(key, baseData);
-    return baseData;
+    // Client-side ML prediction using Ridge Regression model
+    const features = countryDataToFeatures(baseData.co2_intensity_gco2, baseData.energy_mix);
+    const predicted = predictCO2(features);
+    const result: CO2Estimate = {
+      co2_intensity_gco2: Math.round(predicted),
+      energy_mix: baseData.energy_mix,
+      risk_score: baseData.risk_score,
+      confidence: 0.87,
+    };
+    cache.set(key, result);
+    return result;
   }
 
-  // Fallback for countries not in the lookup: estimate from lat/lng
-  const seed = Math.abs(Math.sin(lat * 12.9898 + lng * 78.233) * 43758.5453) % 1;
+  // Fallback for countries not in the lookup: estimate from latitude bands
+  // Equatorial regions tend higher (fossil-dependent developing nations), northern lower (cleaner grids)
+  const absLat = Math.abs(lat);
+  const latFactor = absLat > 50 ? 0.4 : absLat > 30 ? 0.6 : 0.8; // higher = dirtier near equator
+  const baseCi = 150 + latFactor * 400;
+  const features = countryDataToFeatures(baseCi, '40% gas, 30% coal, 20% hydro, 10% other');
+  const predicted = predictCO2(features);
   const fallback: CO2Estimate = {
-    co2_intensity_gco2: Math.round(150 + seed * 400),
-    energy_mix:
-      seed < 0.3
-        ? '50% hydro, 30% gas, 20% other'
-        : seed < 0.6
-          ? '40% coal, 30% gas, 20% hydro, 10% renewables'
-          : '50% gas, 25% coal, 15% oil, 10% renewables',
-    risk_score: Math.round(20 + seed * 50),
-    confidence: 0.3,
+    co2_intensity_gco2: Math.round(predicted),
+    energy_mix: '40% gas, 30% coal, 20% hydro, 10% other',
+    risk_score: Math.round(20 + latFactor * 40),
+    confidence: 0.5,
   };
   cache.set(key, fallback);
   return fallback;

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { GROUND_REGIONS, INITIAL_SATELLITES, type GroundRegion, type SatelliteData } from '@/lib/constants';
-import { fetchTLEGroup, type TLERecord } from '@/lib/tle-service';
+import { fetchTLEGroup, computeOrbitalMetrics, type TLERecord } from '@/lib/tle-service';
 import { propagateAll, type SatelliteCategory } from '@/lib/satellite-store';
 import GlobeView from '@/components/GlobeView';
 import Sidebar from '@/components/Sidebar';
@@ -13,7 +13,9 @@ import ComparePanel, { type CompareLocation } from '@/components/ComparePanel';
 import AddLocationPanel, { type NewLocationData } from '@/components/AddLocationPanel';
 import CountryCard from '@/components/CountryCard';
 import LocationDetailCard, { type LocationDetail } from '@/components/LocationDetailCard';
+import TimelineBar from '@/components/TimelineBar';
 import { type DataLayers } from '@/components/GlobeView';
+import { type ScenarioId } from '@/lib/regression-model';
 import { type CelestialBody, type ExtraterrestrialLocation } from '@/lib/celestial';
 import type { CO2Estimate } from '@/lib/co2-api';
 import { estimateCO2 } from '@/lib/co2-api';
@@ -101,6 +103,8 @@ export default function Atlas() {
     new Set(['station', 'weather', 'comms', 'earth-obs', 'navigation', 'science', 'other'])
   );
   const [satelliteSearch, setSatelliteSearch] = useState('');
+  const [projectionYear, setProjectionYear] = useState(2025);
+  const [scenario, setScenario] = useState<ScenarioId>('net_zero');
 
   // Map of all backend locations for enriching inventory items
   const locationsRef = useRef<Map<string, BackendLocation>>(new Map());
@@ -245,7 +249,25 @@ export default function Atlas() {
     // Clear country selection when clicking a datacenter/satellite
     setSelectedCountry(null);
 
-    const detail: LocationDetail = { id, name, body, carbon, region: regionData, satellite: satData, extraterrestrial: etData };
+    // Enrich satellite with orbital metrics from TLE (computed on-demand, not during batch propagation)
+    let enrichedSat = satData;
+    if (body === 'orbit' && satData?.noradId) {
+      const tle = tleRecordsRef.current.find(t => t.NORAD_CAT_ID === satData.noradId);
+      if (tle) {
+        const metrics = computeOrbitalMetrics(tle);
+        enrichedSat = {
+          ...satData,
+          apogeeKm: metrics.apogeeKm,
+          perigeeKm: metrics.perigeeKm,
+          eclipseFraction: metrics.eclipseFraction,
+          radiationLevel: metrics.radiationLevel,
+          powerAvailabilityW: metrics.powerAvailabilityW,
+          latencyMs: metrics.latencyToGroundMs,
+        };
+      }
+    }
+
+    const detail: LocationDetail = { id, name, body, carbon, region: regionData, satellite: enrichedSat, extraterrestrial: etData };
 
     // Enrich with country CO2 data for Earth locations
     if (body === 'earth' && regionData) {
@@ -496,7 +518,7 @@ export default function Atlas() {
       case 'inventory':
         return <InventoryPanel items={inventory} onRemove={handleRemoveFromInventory} onItemClick={handleInventoryClick} onMint={handleMintToSolana} mintingId={mintingId} />;
       case 'compare':
-        return <ComparePanel selected={compareSelected} onSelectedChange={setCompareSelected} locations={compareLocations} />;
+        return <ComparePanel selected={compareSelected} onSelectedChange={setCompareSelected} locations={compareLocations} projectionYear={projectionYear} scenario={scenario} />;
       case 'add':
         return <AddLocationPanel onAdd={handleAddLocation} onBulkAdd={handleBulkAddLocations} />;
     }
@@ -538,7 +560,19 @@ export default function Atlas() {
             onActiveCategoriesChange={setActiveCategories}
             satelliteSearch={satelliteSearch}
             onSatelliteSearchChange={setSatelliteSearch}
+            projectionYear={projectionYear}
+            scenario={scenario}
           />
+
+          {/* Timeline bar for CO₂ projections */}
+          {dataLayers.heatmap && celestialBody === 'earth' && (
+            <TimelineBar
+              year={projectionYear}
+              onYearChange={setProjectionYear}
+              scenario={scenario}
+              onScenarioChange={setScenario}
+            />
+          )}
 
           {/* Init overlay */}
           {showInit && (

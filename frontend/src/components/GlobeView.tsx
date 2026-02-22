@@ -4,6 +4,7 @@ import { GroundRegion, SatelliteData, getIntensityColor, USER_LOCATION } from '@
 import { CelestialBody, CELESTIAL_CONFIGS, MOON_LOCATIONS, MARS_LOCATIONS, type ExtraterrestrialLocation } from '@/lib/celestial';
 import { getCountryFeatures, getCentroid } from '@/lib/geo-countries';
 import { estimateCO2, type CO2Estimate } from '@/lib/co2-api';
+import { type ScenarioId, SCENARIOS, countryDataToFeatures, predictCO2AtYear } from '@/lib/regression-model';
 import { type PowerPlantLOD, type PowerPlantCluster, type DataCenter, getFuelColor, getProviderColor, getVisibleClusters, viewportCull, FUEL_LEGEND, PROVIDER_LEGEND } from '@/lib/geo-data';
 import { getMoonFeatures, type MoonFeature } from '@/lib/moon-data';
 import { getMarsFeatures, getMarsSolarIrradiance, getMarsDustFrequency, computeMarsFeasibility, type MarsFeature } from '@/lib/mars-data';
@@ -37,6 +38,8 @@ interface Props {
   onActiveCategoriesChange?: (cats: Set<SatelliteCategory>) => void;
   satelliteSearch?: string;
   onSatelliteSearchChange?: (search: string) => void;
+  projectionYear?: number;
+  scenario?: ScenarioId;
 }
 
 // Generate orbit trajectory points for a satellite
@@ -70,21 +73,8 @@ function generateOrbitPath(sat: SatelliteData, numPoints = 360): { lat: number; 
   return points;
 }
 
-// Satellite size/mass mock data
-const SATELLITE_INFO: Record<string, { size: string; mass: string; altitudeKm: number; co2: string }> = {
-  'ISS': { size: '109m × 73m', mass: '420,000 kg', altitudeKm: 408, co2: '200 g CO₂/kWh (amortized)' },
-  'HUBBLE': { size: '13.2m × 4.2m', mass: '11,110 kg', altitudeKm: 547, co2: '150 g CO₂/kWh (amortized)' },
-  'TERRA': { size: '6.8m × 3.5m', mass: '5,190 kg', altitudeKm: 705, co2: '120 g CO₂/kWh (amortized)' },
-  'LANDSAT9': { size: '4.3m × 2.4m', mass: '2,711 kg', altitudeKm: 705, co2: '110 g CO₂/kWh (amortized)' },
-  'NOAA20': { size: '6.2m × 3.3m', mass: '2,445 kg', altitudeKm: 824, co2: '130 g CO₂/kWh (amortized)' },
-  'SENTINEL6': { size: '5.1m × 2.3m', mass: '1,192 kg', altitudeKm: 1336, co2: '100 g CO₂/kWh (amortized)' },
-  'TIANGONG': { size: '55m × 30m', mass: '100,000 kg', altitudeKm: 390, co2: '210 g CO₂/kWh (amortized)' },
-  'STARLINK': { size: '3.4m × 1.8m', mass: '260 kg', altitudeKm: 550, co2: '170 g CO₂/kWh (amortized)' },
-  'GOES16': { size: '6.1m × 5.6m', mass: '5,192 kg', altitudeKm: 35786, co2: '95 g CO₂/kWh (solar only)' },
-  'INMARSAT5': { size: '7.8m × 3.4m', mass: '6,070 kg', altitudeKm: 35786, co2: '85 g CO₂/kWh (solar only)' },
-};
 
-export default function GlobeView({ regions, satellites, routingTarget, celestialBody, onCelestialBodyChange, onLocationClick, zoomTarget, moonLocations, marsLocations, dataLayers, onDataLayersChange, onCountryClick, activeCountry, activeLocation, powerPlantLOD, globalDatacenters, activeCategories, onActiveCategoriesChange, satelliteSearch, onSatelliteSearchChange }: Props) {
+export default function GlobeView({ regions, satellites, routingTarget, celestialBody, onCelestialBodyChange, onLocationClick, zoomTarget, moonLocations, marsLocations, dataLayers, onDataLayersChange, onCountryClick, activeCountry, activeLocation, powerPlantLOD, globalDatacenters, activeCategories, onActiveCategoriesChange, satelliteSearch, onSatelliteSearchChange, projectionYear, scenario }: Props) {
   const globeRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -618,9 +608,16 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
               if (age.startsWith('N') || age.includes('Noachian')) return 'rgba(180, 80, 60, 0.3)';
               return 'rgba(120, 100, 80, 0.2)';
             }
-            // Earth country heatmap (existing logic)
+            // Earth country heatmap — projected via regression model
             const co2 = countryCO2.get(d.properties.name);
             if (!co2) return 'rgba(100, 100, 100, 0.15)';
+            const yr = projectionYear ?? 2025;
+            const sc = scenario ?? 'bau';
+            if (yr > 2025) {
+              const features = countryDataToFeatures(co2.co2_intensity_gco2, co2.energy_mix);
+              const projected = predictCO2AtYear(features, yr, SCENARIOS[sc]);
+              return getIntensityColor(projected) + '66';
+            }
             return getIntensityColor(co2.co2_intensity_gco2) + '66';
           }}
           polygonSideColor={() => 'rgba(0, 0, 0, 0)'}
@@ -633,7 +630,15 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
               return `<b>${name}</b>${area ? `<br/>${Math.round(area).toLocaleString()} km²` : ''}`;
             }
             const co2 = countryCO2.get(d.properties.name);
-            return `<b>${d.properties.name}</b>${co2 ? `<br/>${co2.co2_intensity_gco2} g CO₂/kWh` : ''}`;
+            if (!co2) return `<b>${d.properties.name}</b>`;
+            const yr = projectionYear ?? 2025;
+            const sc = scenario ?? 'bau';
+            if (yr > 2025) {
+              const features = countryDataToFeatures(co2.co2_intensity_gco2, co2.energy_mix);
+              const projected = Math.round(predictCO2AtYear(features, yr, SCENARIOS[sc]));
+              return `<b>${d.properties.name}</b><br/>${projected} g CO₂/kWh <span style="opacity:0.6">(${yr} est.)</span>`;
+            }
+            return `<b>${d.properties.name}</b><br/>${co2.co2_intensity_gco2} g CO₂/kWh`;
           }}
           onPolygonClick={handlePolygonClick as any}
           htmlElementsData={htmlElementsData}
@@ -727,6 +732,48 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
               {globalDatacenters ? <span className="text-muted-foreground ml-1">({globalDatacenters.length})</span> : null}
             </span>
           </label>
+
+          {/* CO₂ Rankings */}
+          {dataLayers.heatmap && countryCO2.size > 0 && (
+            <div className="border-t border-border/50 pt-1.5 mt-1.5 space-y-1">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider font-semibold">
+                Rankings {(projectionYear ?? 2025) > 2025 ? `(${projectionYear} est.)` : ''}
+              </p>
+              {(() => {
+                const yr = projectionYear ?? 2025;
+                const sc = scenario ?? 'bau';
+                const ranked = Array.from(countryCO2.entries())
+                  .map(([name, co2]) => {
+                    if (yr > 2025) {
+                      const features = countryDataToFeatures(co2.co2_intensity_gco2, co2.energy_mix);
+                      return { name, ci: Math.round(predictCO2AtYear(features, yr, SCENARIOS[sc])) };
+                    }
+                    return { name, ci: co2.co2_intensity_gco2 };
+                  })
+                  .sort((a, b) => a.ci - b.ci);
+                const greenest = ranked.slice(0, 5);
+                const dirtiest = ranked.slice(-5).reverse();
+                return (
+                  <>
+                    <p className="text-[8px] text-emerald-400/80 font-medium">Greenest</p>
+                    {greenest.map((c, i) => (
+                      <div key={c.name} className="flex items-center justify-between text-[9px]">
+                        <span className="text-muted-foreground truncate max-w-[110px]">{i + 1}. {c.name}</span>
+                        <span className="font-mono" style={{ color: getIntensityColor(c.ci) }}>{c.ci}</span>
+                      </div>
+                    ))}
+                    <p className="text-[8px] text-red-400/80 font-medium mt-1">Highest CO₂</p>
+                    {dirtiest.map((c, i) => (
+                      <div key={c.name} className="flex items-center justify-between text-[9px]">
+                        <span className="text-muted-foreground truncate max-w-[110px]">{i + 1}. {c.name}</span>
+                        <span className="font-mono" style={{ color: getIntensityColor(c.ci) }}>{c.ci}</span>
+                      </div>
+                    ))}
+                  </>
+                );
+              })()}
+            </div>
+          )}
         </div>
       )}
       {celestialBody === 'orbit' && (
@@ -798,8 +845,6 @@ function createSatelliteElement(d: any, clickRef: React.MutableRefObject<(data: 
   el.style.pointerEvents = 'auto';
   el.style.zIndex = '10';
 
-  const info = SATELLITE_INFO[d.id] || { size: 'Unknown', mass: 'Unknown', altitudeKm: 0, co2: 'N/A' };
-
   // Satellite icon container
   const icon = document.createElement('div');
   icon.style.width = '56px';
@@ -861,21 +906,20 @@ function createSatelliteElement(d: any, clickRef: React.MutableRefObject<(data: 
   tag.style.transition = 'opacity 0.2s ease';
   tag.setAttribute('data-sat-tag', d.id);
 
-  const altKm = d.satData?.altitudeKm || info.altitudeKm || 0;
-  const power = d.satData?.powerAvailabilityW;
-  const eclipse = d.satData?.eclipseFraction;
-  const radiation = d.satData?.radiationLevel;
-  const latency = d.satData?.latencyMs;
+  const sat = d.satData as SatelliteData | null;
+  const altKm = sat?.altitudeKm ?? 0;
+  const bandLabel = sat?.status ? (BAND_LABELS[sat.status as OrbitalBand] ?? sat.status) : '';
+  const catLabel = sat?.category ? (CATEGORY_LABELS[sat.category as SatelliteCategory] ?? '') : '';
 
   tag.innerHTML = `
     <div style="font-size:10px;font-weight:700;color:${d.satData?.color || '#00d4ff'};margin-bottom:3px;">${d.name}</div>
     <div style="font-size:8px;color:#8899aa;line-height:1.5;">
       <span style="color:#ccd;">Alt:</span> ${altKm.toLocaleString()} km<br/>
-      ${power ? `<span style="color:#ccd;">Power:</span> ${power} W/m&sup2;<br/>` : `<span style="color:#ccd;">Size:</span> ${info.size}<br/>`}
-      ${eclipse !== undefined ? `<span style="color:#ccd;">Eclipse:</span> ${(eclipse * 100).toFixed(1)}%<br/>` : ''}
-      ${radiation ? `<span style="color:#ccd;">Radiation:</span> ${radiation}<br/>` : ''}
-      ${latency !== undefined ? `<span style="color:#ccd;">Latency:</span> ${latency.toFixed(1)} ms<br/>` : ''}
-      <span style="color:#ccd;">CO&#8322;:</span> ${info.co2 || 'Solar powered'}
+      ${bandLabel ? `<span style="color:#ccd;">Band:</span> ${bandLabel}<br/>` : ''}
+      ${catLabel ? `<span style="color:#ccd;">Type:</span> ${catLabel}<br/>` : ''}
+      <span style="color:#ccd;">Inc:</span> ${sat?.inclination?.toFixed(1) ?? '?'}°<br/>
+      ${sat?.noradId ? `<span style="color:#667;">NORAD ${sat.noradId}</span><br/>` : ''}
+      <span style="color:#ccd;">Pos:</span> ${sat?.lat?.toFixed(1) ?? '?'}°, ${sat?.lng?.toFixed(1) ?? '?'}°
     </div>
   `;
 
