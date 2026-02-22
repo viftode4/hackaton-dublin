@@ -14,6 +14,7 @@ import AddLocationPanel, { type NewLocationData } from '@/components/AddLocation
 import CountryCard from '@/components/CountryCard';
 import ChatPanel from '@/components/ChatPanel';
 import RankingsPanel from '@/components/RankingsPanel';
+import ModelsPanel from '@/components/ModelsPanel';
 import LocationDetailCard, { type LocationDetail } from '@/components/LocationDetailCard';
 import TimelineBar from '@/components/TimelineBar';
 import { type DataLayers } from '@/components/GlobeView';
@@ -21,7 +22,7 @@ import { type ScenarioId } from '@/lib/regression-model';
 import { type CelestialBody, type ExtraterrestrialLocation } from '@/lib/celestial';
 import type { CO2Estimate } from '@/lib/co2-api';
 import { estimateCO2 } from '@/lib/co2-api';
-import { getLocations, getInventories, createInventory, deleteInventory, mintToSolana, type BackendLocation } from '@/lib/api';
+import { getLocations, getInventories, createInventory, deleteInventory, mintToSolana, listBlueprints, type BackendLocation } from '@/lib/api';
 import { loadPowerPlantLOD, loadDataCenters, type PowerPlantLOD, type DataCenter } from '@/lib/geo-data';
 import { useAuth } from '@/lib/auth';
 
@@ -130,31 +131,34 @@ export default function Atlas() {
         if (moon.length > 0) setMoonLocations(moon);
         if (mars.length > 0) setMarsLocations(mars);
 
-        // Now fetch persisted inventories and enrich with location data
+        // Fetch inventories + sync paid blueprints into inventory + auto-mint
         try {
           const backendInv = await getInventories();
+          const blueprintLocationIds = new Set<string>();
+          try {
+            const blueprints = await listBlueprints(customerId);
+            for (const bp of blueprints) blueprintLocationIds.add(bp.location_id);
+            for (const bp of blueprints) {
+              const existing = backendInv.find(bi => bi.location_id === bp.location_id);
+              if (!existing) {
+                try {
+                  const loc = locMap.get(bp.location_id);
+                  const created = await createInventory({ inventory: { location_id: bp.location_id, name: bp.location_name || loc?.name || bp.location_id, capacity_mw: Math.round(10 + Math.random() * 90), utilization_pct: Math.round(40 + Math.random() * 55), carbon_footprint_tons: loc?.carbon_intensity_gco2 ?? 0, power_source: loc?.energy_sources[0] ?? null, monthly_cost: Math.round(100000 + Math.random() * 900000), workload_types: ['General'] } });
+                  backendInv.push(created);
+                  try { await mintToSolana(bp.location_id, created.id, customerId); const u = await getInventories(); const m = u.find(i => i.id === created.id); if (m) { const idx = backendInv.findIndex(i => i.id === created.id); if (idx >= 0) backendInv[idx] = m; } } catch {}
+                } catch {}
+              } else if (!existing.solana_tx_hash) {
+                try { await mintToSolana(bp.location_id, existing.id, customerId); const u = await getInventories(); const m = u.find(i => i.id === existing.id); if (m) { const idx = backendInv.findIndex(i => i.id === existing.id); if (idx >= 0) backendInv[idx] = m; } } catch {}
+              }
+            }
+          } catch {}
           const enriched: InventoryItem[] = backendInv.map(bi => {
             const loc = locMap.get(bi.location_id);
             const parts = (loc?.name ?? bi.name).split(',').map(s => s.trim());
-            return {
-              id: bi.location_id,
-              backendId: bi.id,
-              name: bi.name,
-              location: loc ? (parts[1] ?? loc.name) : 'Unknown',
-              body: loc?.body ?? 'earth',
-              lat: loc?.coordinates.lat ?? 0,
-              lng: loc?.coordinates.lng ?? 0,
-              capacityMW: bi.capacity_mw,
-              utilization: bi.utilization_pct,
-              carbonFootprint: bi.carbon_footprint_tons,
-              monthlyCost: bi.monthly_cost,
-              solanaTxHash: bi.solana_tx_hash ?? undefined,
-            };
+            return { id: bi.location_id, backendId: bi.id, name: bi.name, location: loc ? (parts[1] ?? loc.name) : 'Unknown', body: loc?.body ?? 'earth', lat: loc?.coordinates.lat ?? 0, lng: loc?.coordinates.lng ?? 0, capacityMW: bi.capacity_mw, utilization: bi.utilization_pct, carbonFootprint: bi.carbon_footprint_tons, monthlyCost: bi.monthly_cost, solanaTxHash: bi.solana_tx_hash ?? undefined };
           });
           if (enriched.length > 0) setInventory(enriched);
-        } catch {
-          // Inventory fetch failed — start with empty, no-op
-        }
+        } catch {}
       })
       .catch(() => {
         // API down — keep hardcoded fallbacks, no-op
@@ -663,6 +667,8 @@ export default function Atlas() {
         return <ComparePanel selected={compareSelected} onSelectedChange={setCompareSelected} locations={compareLocations} projectionYear={projectionYear} scenario={scenario} />;
       case 'add':
         return <AddLocationPanel onAdd={handleAddLocation} onBulkAdd={handleBulkAddLocations} />;
+      case 'models':
+        return <ModelsPanel />;
     }
   };
 

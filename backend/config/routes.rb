@@ -19,6 +19,8 @@ Rails.application.routes.draw do
     post 'payments/checkout', to: 'payments#checkout'
     get 'payments/session/:session_id', to: 'payments#session_status'
     get 'payments/check', to: 'payments#check_blueprint_payment'
+    get 'payments/blueprints', to: 'payments#list_blueprints'
+    get 'payments/blueprint/:id', to: 'payments#show_blueprint'
 
     # Webhooks (Stripe)
     post 'webhooks/stripe', to: 'webhooks#stripe'

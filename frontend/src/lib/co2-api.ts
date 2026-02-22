@@ -11,7 +11,7 @@ const cache = new Map<string, CO2Estimate>();
 
 // Real grid carbon intensity data (g CO₂/kWh) — sources: Ember Global Electricity Review 2024, IEA
 // Energy mix and risk scores based on published national energy statistics
-const COUNTRY_DATA: Record<string, CO2Estimate> = {
+export const COUNTRY_DATA: Record<string, CO2Estimate> = {
   // === Europe ===
   'Iceland':        { co2_intensity_gco2: 28,  energy_mix: '70% hydro, 30% geothermal',               risk_score: 5,  confidence: 0.9 },
   'Norway':         { co2_intensity_gco2: 29,  energy_mix: '92% hydro, 5% wind, 3% thermal',          risk_score: 5,  confidence: 0.9 },

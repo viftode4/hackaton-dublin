@@ -115,28 +115,126 @@ export function computeOrbitalMetrics(tle: TLERecord): OrbitalMetrics {
 }
 
 const CELESTRAK_BASE = 'https://celestrak.org/NORAD/elements/gp.php';
+const TLE_ALT_BASE = 'https://tle.ivanstanojevic.me/api/tle/';
 
-/** Fetch TLE data — try backend proxy first, fall back to direct CelesTrak */
+/** Parse orbital elements from TLE line 2 */
+function parseTLELines(line1: string, line2: string): Pick<TLERecord, 'EPOCH' | 'MEAN_MOTION' | 'ECCENTRICITY' | 'INCLINATION' | 'RA_OF_ASC_NODE' | 'ARG_OF_PERICENTER' | 'MEAN_ANOMALY'> {
+  // Line 1 col 18-32: epoch (YY + day-of-year with fractional)
+  const epochYear = parseInt(line1.substring(18, 20));
+  const epochDay = parseFloat(line1.substring(20, 32));
+  const fullYear = epochYear >= 57 ? 1900 + epochYear : 2000 + epochYear;
+  const jan1 = new Date(Date.UTC(fullYear, 0, 1));
+  const epoch = new Date(jan1.getTime() + (epochDay - 1) * 86400000);
+
+  return {
+    EPOCH: epoch.toISOString(),
+    INCLINATION: parseFloat(line2.substring(8, 16).trim()),
+    RA_OF_ASC_NODE: parseFloat(line2.substring(17, 25).trim()),
+    ECCENTRICITY: parseFloat('0.' + line2.substring(26, 33).trim()),
+    ARG_OF_PERICENTER: parseFloat(line2.substring(34, 42).trim()),
+    MEAN_ANOMALY: parseFloat(line2.substring(43, 51).trim()),
+    MEAN_MOTION: parseFloat(line2.substring(52, 63).trim()),
+  };
+}
+
+/** Convert alternative API response to TLERecord */
+function altToTLERecord(item: { satelliteId: number; name: string; line1: string; line2: string }): TLERecord {
+  const parsed = parseTLELines(item.line1, item.line2);
+  return {
+    OBJECT_NAME: item.name,
+    NORAD_CAT_ID: item.satelliteId,
+    TLE_LINE1: item.line1,
+    TLE_LINE2: item.line2,
+    ...parsed,
+  };
+}
+
+/** Fetch from alternative TLE API (tle.ivanstanojevic.me) — paginated */
+async function fetchFromAltAPI(pageSize = 20, pages = 5): Promise<TLERecord[]> {
+  const results: TLERecord[] = [];
+  for (let page = 1; page <= pages; page++) {
+    const res = await fetch(`${TLE_ALT_BASE}?page=${page}&page_size=${pageSize}`);
+    if (!res.ok) break;
+    const data = await res.json();
+    if (!data.member || data.member.length === 0) break;
+    for (const item of data.member) {
+      results.push(altToTLERecord(item));
+    }
+  }
+  return results;
+}
+
+/** Fetch curated satellites from alternative API */
+async function fetchCuratedFromAlt(): Promise<TLERecord[]> {
+  const ids = Object.values(CURATED_SATELLITE_IDS);
+  const fetches = ids.map(async (id) => {
+    try {
+      const res = await fetch(`${TLE_ALT_BASE}/${id}`);
+      if (!res.ok) return null;
+      const item = await res.json();
+      return altToTLERecord(item);
+    } catch { return null; }
+  });
+  const results = await Promise.all(fetches);
+  return results.filter((r): r is TLERecord => r !== null);
+}
+
+/** Fetch TLE data — try backend proxy, then CelesTrak, then alternative API */
 export async function fetchTLEGroup(group: string): Promise<TLERecord[]> {
   // Try backend proxy first
   try {
     const res = await fetch(`${API_BASE}/api/tle?group=${encodeURIComponent(group)}`);
-    if (res.ok) return res.json();
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
   } catch { /* proxy unavailable */ }
-  // Fall back to direct CelesTrak fetch
-  const res = await fetch(`${CELESTRAK_BASE}?GROUP=${encodeURIComponent(group)}&FORMAT=JSON`);
-  if (!res.ok) throw new Error(`CelesTrak fetch failed: ${res.status}`);
-  return res.json();
+  // Try direct CelesTrak
+  try {
+    const res = await fetch(`${CELESTRAK_BASE}?GROUP=${encodeURIComponent(group)}&FORMAT=JSON`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch { /* CelesTrak unavailable */ }
+  // Fall back to alternative TLE API
+  console.log('CelesTrak unavailable, using alternative TLE API');
+  const curated = await fetchCuratedFromAlt();
+  if (curated.length > 0) {
+    const paginated = await fetchFromAltAPI(20, 5);
+    // Merge curated + paginated, deduplicate by NORAD_CAT_ID
+    const seen = new Set(curated.map(r => r.NORAD_CAT_ID));
+    for (const r of paginated) {
+      if (!seen.has(r.NORAD_CAT_ID)) {
+        curated.push(r);
+        seen.add(r.NORAD_CAT_ID);
+      }
+    }
+    return curated;
+  }
+  throw new Error('All TLE sources unavailable');
 }
 
 export async function fetchTLEByNoradId(catnr: number): Promise<TLERecord[]> {
   try {
     const res = await fetch(`${API_BASE}/api/tle?catnr=${catnr}`);
-    if (res.ok) return res.json();
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
   } catch { /* proxy unavailable */ }
-  const res = await fetch(`${CELESTRAK_BASE}?CATNR=${catnr}&FORMAT=JSON`);
-  if (!res.ok) throw new Error(`CelesTrak fetch failed: ${res.status}`);
-  return res.json();
+  try {
+    const res = await fetch(`${CELESTRAK_BASE}?CATNR=${catnr}&FORMAT=JSON`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch { /* CelesTrak unavailable */ }
+  // Fall back to alternative API
+  const res = await fetch(`${TLE_ALT_BASE}/${catnr}`);
+  if (!res.ok) throw new Error(`All TLE sources failed for NORAD ${catnr}`);
+  const item = await res.json();
+  return [altToTLERecord(item)];
 }
 
 /** Curated list of interesting satellites for the orbital datacenter view */

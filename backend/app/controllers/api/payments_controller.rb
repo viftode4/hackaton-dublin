@@ -48,6 +48,7 @@ module Api
         # Record pending payment
         BlueprintPayment.create!(
           location_id: params[:location_id],
+          location_name: params[:location_name],
           customer_id: customer_id,
           stripe_session_id: session.id,
           customer_email: params[:email],
@@ -114,6 +115,50 @@ module Api
         paid: paid,
         location_id: params[:location_id],
         customer_id: customer_id
+      }
+    end
+
+    # GET /api/payments/blueprints?customer_id=X
+    # List all paid blueprints for a customer
+    def list_blueprints
+      blueprints = BlueprintPayment.paid.for_customer(customer_id).order(paid_at: :desc)
+
+      render json: blueprints.map { |bp|
+        {
+          id: bp.id,
+          location_id: bp.location_id,
+          location_name: bp.location_name || bp.location_id,
+          paid_at: bp.paid_at&.iso8601,
+          has_content: bp.blueprint_content.present?,
+          solana_tx_hash: bp.solana_tx_hash
+        }
+      }
+    end
+
+    # GET /api/payments/blueprint/:id?customer_id=X
+    # Get full blueprint detail
+    def show_blueprint
+      bp = BlueprintPayment.paid.for_customer(customer_id).find_by(id: params[:id])
+
+      unless bp
+        return render json: { error: 'Blueprint not found' }, status: :not_found
+      end
+
+      content = if bp.blueprint_content.present?
+                  begin
+                    JSON.parse(bp.blueprint_content)
+                  rescue JSON::ParserError
+                    bp.blueprint_content
+                  end
+                end
+
+      render json: {
+        id: bp.id,
+        location_id: bp.location_id,
+        location_name: bp.location_name || bp.location_id,
+        paid_at: bp.paid_at&.iso8601,
+        solana_tx_hash: bp.solana_tx_hash,
+        content: content
       }
     end
 

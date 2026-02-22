@@ -1,7 +1,7 @@
-import { MapPin, Package, BarChart3, PlusCircle } from 'lucide-react';
+import { MapPin, Package, BarChart3, Map } from 'lucide-react';
 import skylyLogo from '@/assets/skyly-logo.png';
 
-export type AppTab = 'map' | 'inventory' | 'compare' | 'add';
+export type AppTab = 'map' | 'inventory' | 'compare' | 'add' | 'models';
 
 interface Props {
   activeTab: AppTab;
@@ -12,7 +12,7 @@ const tabs: { id: AppTab; label: string; icon: React.ReactNode }[] = [
   { id: 'map', label: 'Find Location', icon: <MapPin className="w-4 h-4" /> },
   { id: 'inventory', label: 'Inventory', icon: <Package className="w-4 h-4" /> },
   { id: 'compare', label: 'Compare', icon: <BarChart3 className="w-4 h-4" /> },
-  { id: 'add', label: 'Add Location', icon: <PlusCircle className="w-4 h-4" /> },
+  { id: 'models', label: 'Data Analysis', icon: <Map className="w-4 h-4" /> },
 ];
 
 export default function TopNav({ activeTab, onTabChange }: Props) {
