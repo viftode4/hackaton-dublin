@@ -272,11 +272,11 @@ export default function Atlas() {
     return locs;
   }, [regions, satellites, moonLocations, marsLocations, candidateCountries]);
 
-  const handleLocationClick = (id: string, name: string, body: string, carbon: number, regionData?: import('@/lib/constants').GroundRegion, satData?: import('@/lib/constants').SatelliteData) => {
+  const handleLocationClick = (id: string, name: string, body: string, carbon: number, regionData?: import('@/lib/constants').GroundRegion, satData?: import('@/lib/constants').SatelliteData, etData?: ExtraterrestrialLocation) => {
     // Clear country selection when clicking a datacenter/satellite
     setSelectedCountry(null);
 
-    const detail: LocationDetail = { id, name, body, carbon, region: regionData, satellite: satData };
+    const detail: LocationDetail = { id, name, body, carbon, region: regionData, satellite: satData, extraterrestrial: etData };
 
     // Enrich with country CO2 data for Earth locations
     if (body === 'earth' && regionData) {

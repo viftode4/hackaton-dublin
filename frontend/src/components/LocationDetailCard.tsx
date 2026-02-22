@@ -1,6 +1,8 @@
 import { X, Plus, FileText, Package } from 'lucide-react';
 import { getIntensityColor, type GroundRegion, type SatelliteData } from '@/lib/constants';
 import type { CO2Estimate } from '@/lib/co2-api';
+import type { ExtraterrestrialLocation } from '@/lib/celestial';
+import { computeFeasibility, getFeasibilityColor, getFeasibilityLabel } from '@/lib/feasibility';
 
 /** Info for satellite detail display */
 const SATELLITE_INFO: Record<string, { size: string; mass: string; altitudeKm: number; co2: string }> = {
@@ -16,6 +18,13 @@ const SATELLITE_INFO: Record<string, { size: string; mass: string; altitudeKm: n
   'INMARSAT5': { size: '7.8m x 3.4m', mass: '6,070 kg', altitudeKm: 35786, co2: '85 g CO2/kWh' },
 };
 
+const BODY_BADGE: Record<string, { label: string; classes: string }> = {
+  earth: { label: 'Earth', classes: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+  orbit: { label: 'Orbit', classes: 'bg-violet-500/20 text-violet-400 border-violet-500/30' },
+  moon: { label: 'Moon', classes: 'bg-slate-400/20 text-slate-300 border-slate-400/30' },
+  mars: { label: 'Mars', classes: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+};
+
 export interface LocationDetail {
   id: string;
   name: string;
@@ -24,6 +33,7 @@ export interface LocationDetail {
   region?: GroundRegion;
   satellite?: SatelliteData;
   countryCO2?: CO2Estimate;
+  extraterrestrial?: ExtraterrestrialLocation;
 }
 
 interface Props {
@@ -37,7 +47,24 @@ interface Props {
 export default function LocationDetailCard({ location, onDismiss, onGenerateReport, onAddToCompare, onAddToInventory }: Props) {
   const color = getIntensityColor(location.carbon);
   const isOrbit = location.body === 'orbit';
+  const isMoon = location.body === 'moon';
+  const isMars = location.body === 'mars';
   const satInfo = isOrbit && location.satellite ? SATELLITE_INFO[location.satellite.id] : undefined;
+  const badge = BODY_BADGE[location.body] ?? BODY_BADGE.earth;
+  const et = location.extraterrestrial;
+
+  // Compute feasibility score for extraterrestrial locations
+  const feasibility = et ? computeFeasibility({
+    body: et.body,
+    illumination_pct: et.illuminationPct,
+    avg_temperature_c: et.avgTemperatureC,
+    ice_proximity_km: et.iceProximityKm,
+    earth_visible: et.earthVisible,
+    solar_irradiance_w: et.solarIrradianceW,
+    dust_storms_per_year: et.dustStormsPerYear,
+    elevation_km: et.elevationKm,
+    construction_cost_mw: et.constructionCostMw,
+  }) : null;
 
   return (
     <div className="bg-card border border-border rounded-xl p-4 space-y-3 animate-slide-up relative">
@@ -55,12 +82,8 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
           <p className="text-xs text-muted-foreground uppercase tracking-wider">
             {isOrbit ? 'Satellite' : 'Datacenter'}
           </p>
-          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
-            isOrbit
-              ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
-              : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-          }`}>
-            {isOrbit ? 'Orbit' : 'Earth'}
+          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium border ${badge.classes}`}>
+            {badge.label}
           </span>
         </div>
         <h3 className="text-lg font-bold text-foreground">{location.name}</h3>
@@ -70,20 +93,162 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
         {location.satellite && (
           <p className="text-xs text-muted-foreground">{location.satellite.status}</p>
         )}
-      </div>
-
-      {/* CO2 intensity */}
-      <div className="flex items-center gap-2">
-        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}66` }} />
-        <span className="text-sm font-semibold text-foreground">
-          {location.carbon} g CO₂/kWh
-        </span>
-        {location.countryCO2 && location.countryCO2.confidence >= 0.8 && (
-          <span className="text-[9px] px-1.5 py-0.5 bg-primary/20 text-primary border border-primary/30 rounded-full">
-            ML predicted
-          </span>
+        {et && (
+          <p className="text-xs text-muted-foreground">{et.location} · {et.powerSource}</p>
         )}
       </div>
+
+      {/* CO2 / Power source */}
+      {(isMoon || isMars) && et ? (
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-emerald-400" style={{ boxShadow: '0 0 8px #34d39966' }} />
+          <span className="text-sm font-semibold text-emerald-400">Zero-carbon</span>
+          <span className="text-[10px] text-muted-foreground">{et.powerSource}</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}66` }} />
+          <span className="text-sm font-semibold text-foreground">
+            {location.carbon} g CO₂/kWh
+          </span>
+          {location.countryCO2 && location.countryCO2.confidence >= 0.8 && (
+            <span className="text-[9px] px-1.5 py-0.5 bg-primary/20 text-primary border border-primary/30 rounded-full">
+              ML predicted
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Feasibility score bar for Moon/Mars */}
+      {feasibility && (
+        <div className="bg-muted/60 rounded-lg px-3 py-2.5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Feasibility Score</p>
+            <span className="text-sm font-bold" style={{ color: getFeasibilityColor(feasibility.overall) }}>
+              {feasibility.overall}/100 — {getFeasibilityLabel(feasibility.overall)}
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {([
+              ['Power', feasibility.power],
+              ['Cooling', feasibility.cooling],
+              ['Connectivity', feasibility.connectivity],
+              ['Resilience', feasibility.resilience],
+              ['Cost', feasibility.cost],
+            ] as [string, number][]).map(([label, score]) => (
+              <div key={label} className="flex items-center gap-2">
+                <span className="text-[9px] text-muted-foreground w-16">{label}</span>
+                <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{ width: `${score}%`, backgroundColor: getFeasibilityColor(score) }}
+                  />
+                </div>
+                <span className="text-[9px] font-medium text-foreground w-6 text-right">{score}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Moon-specific metrics */}
+      {isMoon && et && (
+        <div className="grid grid-cols-2 gap-2">
+          {et.illuminationPct != null && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Solar Illumination</p>
+              <p className="text-sm font-semibold text-foreground">{et.illuminationPct}%</p>
+            </div>
+          )}
+          {et.avgTemperatureC != null && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Avg Temperature</p>
+              <p className="text-sm font-semibold text-foreground">{et.avgTemperatureC}°C</p>
+            </div>
+          )}
+          {et.earthVisible != null && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Earth Line-of-Sight</p>
+              <p className="text-sm font-semibold text-foreground">{et.earthVisible ? 'Direct' : 'Relay needed'}</p>
+            </div>
+          )}
+          {et.iceProximityKm != null && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Water Ice</p>
+              <p className="text-sm font-semibold text-foreground">{et.iceProximityKm === 0 ? 'On-site' : `${et.iceProximityKm} km`}</p>
+            </div>
+          )}
+          {et.coolingEfficiency != null && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Cooling Efficiency</p>
+              <p className="text-sm font-semibold text-foreground">{et.coolingEfficiency}/100</p>
+            </div>
+          )}
+          {et.radiationLevel && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Radiation</p>
+              <p className="text-sm font-semibold text-foreground capitalize">{et.radiationLevel}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Mars-specific metrics */}
+      {isMars && et && (
+        <div className="grid grid-cols-2 gap-2">
+          {et.solarIrradianceW != null && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Solar Irradiance</p>
+              <p className="text-sm font-semibold text-foreground">{et.solarIrradianceW} W/m²</p>
+            </div>
+          )}
+          {et.avgTemperatureC != null && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Avg Temperature</p>
+              <p className="text-sm font-semibold text-foreground">{et.avgTemperatureC}°C</p>
+            </div>
+          )}
+          {et.dustStormsPerYear != null && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Dust Storms</p>
+              <p className="text-sm font-semibold text-foreground">{et.dustStormsPerYear}/yr</p>
+            </div>
+          )}
+          {et.elevationKm != null && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Elevation</p>
+              <p className="text-sm font-semibold text-foreground">{et.elevationKm > 0 ? '+' : ''}{et.elevationKm} km</p>
+            </div>
+          )}
+          {et.coolingEfficiency != null && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Cooling Efficiency</p>
+              <p className="text-sm font-semibold text-foreground">{et.coolingEfficiency}/100</p>
+            </div>
+          )}
+          {et.radiationLevel && (
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Radiation</p>
+              <p className="text-sm font-semibold text-foreground capitalize">{et.radiationLevel}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Latency callout for Moon/Mars */}
+      {(isMoon || isMars) && et?.latencyToEarthMs != null && (
+        <div className="bg-muted/40 rounded-lg px-3 py-2 border border-border/50">
+          <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">Earth Communication</p>
+          <p className="text-xs text-foreground">
+            One-way latency: <span className="font-semibold text-primary">
+              {et.latencyToEarthMs < 5000
+                ? `${(et.latencyToEarthMs / 1000).toFixed(1)}s`
+                : `${(et.latencyToEarthMs / 60000).toFixed(1)} min`}
+            </span>
+            {isMars && <span className="text-muted-foreground"> (avg, varies 4.3–24 min)</span>}
+          </p>
+        </div>
+      )}
 
       {/* Energy mix — from countryCO2 or region */}
       {location.countryCO2?.energy_mix && (

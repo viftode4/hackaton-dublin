@@ -21,7 +21,7 @@ interface Props {
   routingTarget: { lat: number; lng: number } | null;
   celestialBody: CelestialBody;
   onCelestialBodyChange: (body: CelestialBody) => void;
-  onLocationClick?: (id: string, name: string, body: string, carbon: number, regionData?: GroundRegion, satData?: SatelliteData) => void;
+  onLocationClick?: (id: string, name: string, body: string, carbon: number, regionData?: GroundRegion, satData?: SatelliteData, etData?: ExtraterrestrialLocation) => void;
   zoomTarget?: { lat: number; lng: number } | null;
   moonLocations?: ExtraterrestrialLocation[];
   marsLocations?: ExtraterrestrialLocation[];
@@ -287,7 +287,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       if (loc) {
         globeRef.current?.pointOfView({ lat: loc.lat, lng: loc.lng, altitude: 0.8 }, 800);
         setClickedPin({ lat: loc.lat, lng: loc.lng, name: loc.name, co2: loc.carbonIntensity });
-        onLocationClick?.(loc.id, loc.name, celestialBody, loc.carbonIntensity);
+        onLocationClick?.(loc.id, loc.name, celestialBody, loc.carbonIntensity, undefined, undefined, loc);
       }
     }
   };
