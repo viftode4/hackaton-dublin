@@ -1012,6 +1012,22 @@ def compute_green_score(
         if w_total > 0:
             emaps_idw_ci_val = w_ci / w_total
 
+    # ── Local LINEAR emission trend (capacity-weighted) ──
+    # Computed before feats_dict so temporal features are available for Ridge
+    local_trend_b = 0.0
+    if POWER_TREE is not None:
+        ind_t = POWER_TREE.query_radius(target_rad, r=radius_rad)
+        if len(ind_t[0]) > 0:
+            lp_t = POWER_PLANTS_DF.iloc[ind_t[0]]
+            caps_t = lp_t['capacity'].fillna(1.0).values
+            w = caps_t / max(caps_t.sum(), 1.0)
+            local_trend_b = float((lp_t['trend_b'].values * w).sum())
+    # Fallback to country-level linear if no local plants
+    _trend_tmp = COUNTRY_TRENDS.get(country_iso3, {})
+    if local_trend_b == 0.0 and _trend_tmp:
+        pct = _trend_tmp.get('pct_change_per_year', 0.0)
+        local_trend_b = (pct / 100.0) if pct else 0.0
+
     predicted_ci = base_ci
     if REGRESSION_MODEL:
         feats_dict = {
@@ -1090,21 +1106,7 @@ def compute_green_score(
     trend = COUNTRY_TRENDS.get(country_iso3, {})
     base_mix_ratio = renewable_capacity_mw / max(1, renewable_capacity_mw + fossil_capacity_mw)
 
-    # ── Local LINEAR emission trend (capacity-weighted) ──
-    # Uses same query_radius result from above (no extra BallTree call)
-    local_trend_b = 0.0
-    if POWER_TREE is not None:
-        ind_t = POWER_TREE.query_radius(target_rad, r=radius_rad)
-        if len(ind_t[0]) > 0:
-            lp_t = POWER_PLANTS_DF.iloc[ind_t[0]]
-            caps_t = lp_t['capacity'].fillna(1.0).values
-            w = caps_t / max(caps_t.sum(), 1.0)
-            local_trend_b = float((lp_t['trend_b'].values * w).sum())
-    # Fallback to country-level linear if no local plants
-    if local_trend_b == 0.0 and trend:
-        pct = trend.get('pct_change_per_year', 0.0)
-        local_trend_b = (pct / 100.0) if pct else 0.0
-
+    # local_trend_b already computed above (before feats_dict)
     trend['emission_pct_change_per_year'] = round(local_trend_b * 100, 4)
     trend['local_trend_b'] = round(local_trend_b, 6)
     trend['trend_type'] = 'linear'
