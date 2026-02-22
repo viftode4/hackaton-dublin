@@ -46,7 +46,7 @@ export function predictCO2(features: LocationFeatures): number {
     features.local_pct_coal,
     features.local_pct_clean,
     features.idw_weighted_ci,
-    features.country_ci ** 2,
+    features.country_ci ** 2 / 1000,   // training pipeline scales ci² down by 1000
     features.emaps_zone_ci,
   ];
 
