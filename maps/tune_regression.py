@@ -73,6 +73,8 @@ def main():
         "n_fossil_ops_300km", "fossil_emissions_300km",
         "n_coal_mines", "nearest_dc_km", "n_dcs_300km",
         "local_generation_gwh", "mean_emissions_per_plant",
+        # Temporal features
+        "country_trend_pct", "local_trend_b", "local_trend_x_ci",
     ]
     avail = [f for f in all_feats if f in df.columns]
 

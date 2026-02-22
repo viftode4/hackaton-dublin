@@ -1048,6 +1048,9 @@ def compute_green_score(
             "state_ci": state_ci_val,
             # Provider dummy (0.0 at inference = predict actual grid CI)
             "is_gcp": 0.0,
+            # Temporal features
+            "country_trend_pct": COUNTRY_TRENDS.get(country_iso3, {}).get('pct_change_per_year', 0.0),
+            "local_trend_x_ci": local_trend_b * base_ci,
         }
         x = [feats_dict.get(f, 0.0) for f in REGRESSION_MODEL["features"]]
         x_scaled = (np.array(x) - np.array(REGRESSION_MODEL["scaler_mean"])) / np.array(REGRESSION_MODEL["scaler_scale"])
@@ -1650,6 +1653,9 @@ def predict_grid_batch(
             "state_ci": state_ci_val,
             # Provider dummy (0.0 at inference = predict actual grid CI)
             "is_gcp": 0.0,
+            # Temporal features
+            "country_trend_pct": COUNTRY_TRENDS.get(country_iso3, {}).get('pct_change_per_year', 0.0),
+            "local_trend_x_ci": local_trend_b_val * base_ci,
         }
         X[idx] = [feats_dict.get(f, 0.0) for f in feat_names]
 

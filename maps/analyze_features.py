@@ -94,6 +94,40 @@ def main():
     pp_tree = BallTree(pp_coords, metric='haversine')
     print(f"    {len(pp)} plants (year {latest})")
 
+    # ── 3b. Compute per-plant emission trends (2021-2024) ──
+    print("  Computing per-plant & country emission trends...")
+    from scipy.stats import linregress
+    trend_years_max = latest - 1  # exclude latest (often incomplete)
+    annual_pp = raw_pp[raw_pp['year'] <= trend_years_max].groupby(
+        ['source_name', 'year'])['emissions_quantity'].sum().reset_index()
+    plant_trend_map = {}
+    for name, grp in annual_pp.groupby('source_name'):
+        if len(grp) >= 2:
+            x = grp['year'].values.astype(float)
+            y = grp['emissions_quantity'].values.astype(float)
+            em_mean = y.mean()
+            if em_mean > 0:
+                sl = linregress(x, y).slope
+                plant_trend_map[name] = sl / em_mean  # fractional change/yr
+    pp['trend_b'] = pp['source_name'].map(lambda n: plant_trend_map.get(n, 0.0))
+    pp_trend_b = pp['trend_b'].values
+    pp_caps_arr = pp['capacity'].fillna(1.0).values
+
+    # Country-level emission trends
+    country_year_em = raw_pp[raw_pp['year'] <= trend_years_max].groupby(
+        ['iso3_country', 'year'])['emissions_quantity'].sum().reset_index()
+    country_trend_pct_map = {}
+    for iso, grp in country_year_em.groupby('iso3_country'):
+        grp = grp.sort_values('year')
+        if len(grp) >= 2:
+            x = grp['year'].values.astype(float)
+            y = grp['emissions_quantity'].values.astype(float)
+            em_mean = y.mean()
+            if em_mean > 0:
+                sl = linregress(x, y).slope
+                country_trend_pct_map[iso] = (sl / em_mean) * 100.0  # pct/yr
+    print(f"    {len(plant_trend_map)} plant trends, {len(country_trend_pct_map)} country trends")
+
     # ── 4. Load fossil ops ──
     print("\n[4] Loading fossil fuel operations...")
     fossil_dfs = []
@@ -771,6 +805,22 @@ def main():
 
         # Feature: Provider dummy (GCP has systematic positive bias ~+31)
         features["is_gcp"] = 1.0 if provider == 'gcp' else 0.0
+
+        # ── Temporal features ──
+        iso_code = features.get("country_iso", "")
+        features["country_trend_pct"] = country_trend_pct_map.get(iso_code, 0.0)
+        # Local trend_b: capacity-weighted plant trends within 300km
+        local_trend_b_val = 0.0
+        if len(local_pp) > 0:
+            lp_idx = local_pp.index
+            caps_t = pp_caps_arr[lp_idx]
+            w = caps_t / max(caps_t.sum(), 1.0)
+            local_trend_b_val = float((pp_trend_b[lp_idx] * w).sum())
+        if local_trend_b_val == 0.0:
+            pct = country_trend_pct_map.get(iso_code, 0.0)
+            local_trend_b_val = pct / 100.0  # fallback to country
+        features["local_trend_b"] = local_trend_b_val
+        features["local_trend_x_ci"] = local_trend_b_val * (ci_val if not np.isnan(ci_val) else 0.0)
 
         cloud_features.append(features)
 
