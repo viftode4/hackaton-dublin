@@ -323,6 +323,80 @@ def main():
         if len(parts) == 2 and "lonlat" in data:
             region_to_dc[parts[1]] = data["lonlat"]
 
+    # ── City-based coordinate fallback ──
+    # For regions not in the DC JSON (e.g. Azure naming conventions differ)
+    CITY_COORDS = {
+        # (city.lower(), iso): [lon, lat]
+        ("johannesburg", "ZAF"): [28.0473, -26.2041],
+        ("cape town", "ZAF"): [18.4231, -33.9221],
+        ("changhua county", "TWN"): [120.5161, 24.0518],
+        ("hong kong", "CHN"): [114.1694, 22.3193],
+        ("tokyo", "JPN"): [139.65, 35.6764],
+        ("osaka", "JPN"): [135.5023, 34.6937],
+        ("seoul", "KOR"): [126.9971, 37.5503],
+        ("mumbai", "IND"): [72.8777, 19.076],
+        ("delhi", "IND"): [77.1025, 28.7041],
+        ("hyderabad", "IND"): [78.476, 17.366],
+        ("pune", "IND"): [73.8567, 18.5204],
+        ("chennai", "IND"): [80.2707, 13.0827],
+        ("singapore", "SGP"): [103.8198, 1.3521],
+        ("jurong west", "SGP"): [103.7067, 1.3404],
+        ("jakarta", "IDN"): [106.8229, -6.1944],
+        ("sydney", "AUS"): [151.2093, -33.8688],
+        ("melbourne", "AUS"): [144.9631, -37.8136],
+        ("warsaw", "POL"): [21.0122, 52.2297],
+        ("hamina", "FIN"): [27.195, 60.5693],
+        ("stockholm", "SWE"): [18.0656, 59.3327],
+        ("gavle", "SWE"): [17.1413, 60.6749],
+        ("madrid", "ESP"): [-3.7038, 40.4168],
+        ("zaragoza", "ESP"): [-0.8247, 41.7737],
+        ("st. ghislain", "BEL"): [3.8186, 50.449],
+        ("london", "GBR"): [-0.1276, 51.5072],
+        ("cardiff", "GBR"): [-3.1791, 51.4816],
+        ("frankfurt", "DEU"): [8.6821, 50.1109],
+        ("berlin", "DEU"): [13.405, 52.52],
+        ("eemshaven", "NLD"): [6.8317, 53.4386],
+        ("amsterdam", "NLD"): [4.9041, 52.3676],
+        ("zurich", "CHE"): [8.5417, 47.3769],
+        ("milan", "ITA"): [9.1824, 45.4685],
+        ("turin", "ITA"): [7.6869, 45.0703],
+        ("paris", "FRA"): [2.3514, 48.8575],
+        ("marseille", "FRA"): [5.3698, 43.2965],
+        ("doha", "QAT"): [51.5310, 25.2854],
+        ("dammam", "SAU"): [50.1033, 26.3927],
+        ("tel aviv", "ISR"): [34.7818, 32.0853],
+        ("montreal", "CAN"): [-73.5674, 45.5019],
+        ("toronto", "CAN"): [-79.3832, 43.6532],
+        ("quebec city", "CAN"): [-71.2075, 46.8139],
+        ("calgary", "CAN"): [-114.0719, 51.0447],
+        ("queretaro", "MEX"): [-100.3899, 20.5888],
+        ("sao paulo", "BRA"): [-46.6396, -23.5558],
+        ("santiago", "CHL"): [-70.6693, -33.4489],
+        ("council bluffs", "USA"): [-95.8608, 41.2619],
+        ("moncks corner", "USA"): [-80.0131, 33.1960],
+        ("columbus", "USA"): [-82.9988, 39.9612],
+        ("ashburn", "USA"): [-77.4291, 39.0067],
+        ("dallas", "USA"): [-96.7970, 32.7767],
+        ("san antonio", "USA"): [-98.4936, 29.4241],
+        ("the dalles", "USA"): [-121.1787, 45.5946],
+        ("los angeles", "USA"): [-118.2437, 34.0522],
+        ("salt lake city", "USA"): [-111.8910, 40.7608],
+        ("las vegas", "USA"): [-115.1398, 36.1699],
+        ("san francisco", "USA"): [-122.4194, 37.7749],
+        ("portland", "USA"): [-122.6765, 45.5152],
+        ("phoenix", "USA"): [-112.0740, 33.4484],
+        ("des moines", "USA"): [-93.6091, 41.5868],
+        ("chicago", "USA"): [-87.6298, 41.8781],
+        ("seattle", "USA"): [-122.3321, 47.6062],
+        ("kuala lumpur", "MYS"): [101.6841, 3.1319],
+        ("auckland", "NZL"): [174.7633, -36.8485],
+        ("bangkok", "THA"): [100.5018, 13.7563],
+        ("bahrain", "BHR"): [50.5577, 26.0667],
+        ("dubai", "ARE"): [55.2708, 25.2048],
+        ("oslo", "NOR"): [10.7522, 59.9139],
+        ("dublin", "IRL"): [-6.2603, 53.3498],
+    }
+
     matched = 0
     cloud_features = []
 
@@ -341,6 +415,12 @@ def main():
                 if k == full_key and "lonlat" in v:
                     coords = v["lonlat"]
                     break
+
+        # Fallback: match by city name + country ISO
+        if coords is None:
+            city_name = str(row.get('city', '')).lower().strip()
+            if city_name:
+                coords = CITY_COORDS.get((city_name, country_iso))
 
         if coords is None:
             continue  # can't match this region

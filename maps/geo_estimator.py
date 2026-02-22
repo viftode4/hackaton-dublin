@@ -63,9 +63,15 @@ ZONE_POLY_NAMES = None   # list of zone names (matches polygon order)
 ZONE_POLY_TREE = None    # shapely STRtree for vectorised point-in-polygon
 ZONE_POLY_CI = {}        # zone_name -> CI value (gCO₂/kWh)
 
-CODECARBON_USA_PATH = "../codecarbon/codecarbon/data/private_infra/2016/usa_emissions.json"
-CODECARBON_CAN_PATH = "../codecarbon/codecarbon/data/private_infra/2023/canada_energy_mix.json"
-REGRESSION_MODEL_PATH = "trained_model.json"
+# Resolve all paths relative to this script's directory (works regardless of CWD)
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_SCRIPT_DIR)  # hackaton-dublin/
+_HACK = os.path.dirname(_ROOT)        # hackathon/
+_p = lambda *parts: os.path.join(*parts)
+
+CODECARBON_USA_PATH = _p(_HACK, "codecarbon/codecarbon/data/private_infra/2016/usa_emissions.json")
+CODECARBON_CAN_PATH = _p(_HACK, "codecarbon/codecarbon/data/private_infra/2023/canada_energy_mix.json")
+REGRESSION_MODEL_PATH = _p(_SCRIPT_DIR, "trained_model.json")
 
 CODECARBON_MIX = {}
 FUEL_WEIGHTS = {}       # gCO2eq/kWh per fuel type from CodeCarbon
@@ -83,17 +89,17 @@ COUNTRY_TRENDS = {}     # {iso3: {years: [...], emissions: [...], slope, r2, pro
 
 UK_CI_API = "https://api.carbonintensity.org.uk"
 
-# Paths
-DATA_CENTERS_PATH = "../electricitymaps-contrib/config/data_centers/data_centers.json"
-EMAPS_ZONES_DIR = "../electricitymaps-contrib/config/zones"
-CLIMATE_TRACE_POWER = "../datasets_tracer/power/DATA/electricity-generation_emissions_sources_v5_3_0.csv"
-CLIMATE_TRACE_COAL = "../datasets_tracer/fossil_fuel_operations/DATA/coal-mining_emissions_sources_v5_3_0.csv"
-CLIMATE_TRACE_REFINING = "../datasets_tracer/fossil_fuel_operations/DATA/oil-and-gas-refining_emissions_sources_v5_3_0.csv"
-CLIMATE_TRACE_OILGAS = "../datasets_tracer/fossil_fuel_operations/DATA/oil-and-gas-production_emissions_sources_v5_3_0.csv"
-WRI_GPPD_PATH = "../datasets_tracer/globalpowerplantdatabasev130/global_power_plant_database.csv"
-WORLD_GEOJSON_PATH = "../electricitymaps-contrib/geo/world.geojson"
-CODECARBON_MIX_PATH = "../codecarbon/codecarbon/data/private_infra/global_energy_mix.json"
-CODECARBON_FUEL_PATH = "../codecarbon/codecarbon/data/private_infra/carbon_intensity_per_source.json"
+# Paths (relative to workspace root via _HACK)
+DATA_CENTERS_PATH = _p(_HACK, "electricitymaps-contrib/config/data_centers/data_centers.json")
+EMAPS_ZONES_DIR = _p(_HACK, "electricitymaps-contrib/config/zones")
+CLIMATE_TRACE_POWER = _p(_HACK, "datasets_tracer/power/DATA/electricity-generation_emissions_sources_v5_3_0.csv")
+CLIMATE_TRACE_COAL = _p(_HACK, "datasets_tracer/fossil_fuel_operations/DATA/coal-mining_emissions_sources_v5_3_0.csv")
+CLIMATE_TRACE_REFINING = _p(_HACK, "datasets_tracer/fossil_fuel_operations/DATA/oil-and-gas-refining_emissions_sources_v5_3_0.csv")
+CLIMATE_TRACE_OILGAS = _p(_HACK, "datasets_tracer/fossil_fuel_operations/DATA/oil-and-gas-production_emissions_sources_v5_3_0.csv")
+WRI_GPPD_PATH = _p(_HACK, "datasets_tracer/globalpowerplantdatabasev130/global_power_plant_database.csv")
+WORLD_GEOJSON_PATH = _p(_HACK, "electricitymaps-contrib/geo/world.geojson")
+CODECARBON_MIX_PATH = _p(_HACK, "codecarbon/codecarbon/data/private_infra/global_energy_mix.json")
+CODECARBON_FUEL_PATH = _p(_HACK, "codecarbon/codecarbon/data/private_infra/carbon_intensity_per_source.json")
 
 
 # =====================================================================
