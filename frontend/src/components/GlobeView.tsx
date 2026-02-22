@@ -318,20 +318,65 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     if (body === 'earth') {
       // On Earth, polygon click handles countries — globe click is fallback for ocean areas
       setClickedPin({ lat, lng, name: label, co2: 0 });
-      onLocationClick?.(
-        `custom-${lat.toFixed(2)}-${lng.toFixed(2)}`, label, 'earth', 0
-      );
+      onLocationClick?.(`custom-${lat.toFixed(2)}-${lng.toFixed(2)}`, label, 'earth', 0);
     } else if (body === 'moon' || body === 'mars') {
-      setClickedPin({ lat, lng, name: `${body === 'moon' ? 'Lunar' : 'Martian'} Site (${label})`, co2: 0 });
-      onLocationClick?.(
-        `custom-${body}-${lat.toFixed(2)}-${lng.toFixed(2)}`,
-        `${body === 'moon' ? 'Lunar' : 'Martian'} Site (${label})`,
-        body, 0
-      );
+      // Find nearest predefined location (snap if within ~10°, otherwise create custom)
+      const DEG2RAD = Math.PI / 180;
+      let nearest: ExtraterrestrialLocation | undefined;
+      let minDist = Infinity;
+      for (const loc of currentLocations) {
+        const dLat = (loc.lat - lat) * DEG2RAD;
+        const dLng = (loc.lng - lng) * DEG2RAD;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat*DEG2RAD)*Math.cos(loc.lat*DEG2RAD)*Math.sin(dLng/2)**2;
+        const dist = 2 * Math.asin(Math.sqrt(a)) / DEG2RAD; // degrees
+        if (dist < minDist) { minDist = dist; nearest = loc; }
+      }
+
+      if (nearest && minDist < 10) {
+        // Snap to nearest known location
+        setClickedPin({ lat: nearest.lat, lng: nearest.lng, name: nearest.name, co2: nearest.carbonIntensity });
+        onLocationClick?.(nearest.id, nearest.name, body, nearest.carbonIntensity, undefined, undefined, nearest);
+        globeRef.current?.pointOfView({ lat: nearest.lat, lng: nearest.lng, altitude: 1.2 }, 1000);
+      } else {
+        // Custom location — build a synthetic ExtraterrestrialLocation with computed metrics
+        const siteName = `${body === 'moon' ? 'Lunar' : 'Martian'} Site (${label})`;
+        const customET: ExtraterrestrialLocation = {
+          id: `custom-${body}-${lat.toFixed(2)}-${lng.toFixed(2)}`,
+          name: siteName,
+          location: `${lat.toFixed(1)}° lat, ${lng.toFixed(1)}° lng`,
+          lat, lng, body: body as CelestialBody,
+          carbonIntensity: 0, baseCarbonIntensity: 0,
+          powerSource: body === 'moon' ? 'Solar' : 'Solar + Nuclear',
+          capacity: 'TBD', status: 'Custom site',
+          ...(body === 'moon' ? {
+            illuminationPct: Math.abs(lat) > 80 ? 70 + Math.round((90 - Math.abs(lat)) * 2.3) : 50,
+            avgTemperatureC: Math.abs(lat) > 80 ? -170 : -23 + Math.abs(lat) * -1.5,
+            earthVisible: Math.abs(lng) < 90,
+            iceProximityKm: Math.abs(lat) > 80 ? Math.round(Math.abs(90 - Math.abs(lat)) * 5) : 1000,
+            latencyToEarthMs: Math.abs(lng) < 90 ? 1300 : 2600,
+            coolingEfficiency: Math.abs(lat) > 80 ? 94 : 60,
+            radiationLevel: 'high' as const,
+            constructionCostMw: 5e8,
+          } : {
+            solarIrradianceW: Math.abs(lat) < 15 ? 560 : Math.abs(lat) < 30 ? 520 : Math.abs(lat) < 45 ? 440 : 350,
+            avgTemperatureC: -33 - Math.abs(lat) * 0.8,
+            dustStormsPerYear: 20,
+            elevationKm: 0,
+            latencyToEarthMs: 750000,
+            coolingEfficiency: 80,
+            radiationLevel: 'extreme' as const,
+            constructionCostMw: 1.2e9,
+          }),
+        };
+        setClickedPin({ lat, lng, name: siteName, co2: 0 });
+        onLocationClick?.(customET.id, siteName, body, 0, undefined, undefined, customET);
+        globeRef.current?.pointOfView({ lat, lng, altitude: 1.2 }, 1000);
+      }
+      return;
     }
 
     globeRef.current?.pointOfView({ lat, lng, altitude: 1.2 }, 1000);
-  }, [celestialBody, onLocationClick]);
+  }, [celestialBody, onLocationClick, currentLocations]);
 
   // HTML elements: user's datacenter pins on Earth, satellite markers on orbit, plus clicked pin
   const htmlElementsData = useMemo(() => {
