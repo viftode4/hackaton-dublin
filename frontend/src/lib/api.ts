@@ -128,31 +128,17 @@ export async function createInventory(data: { inventory: Omit<BackendInventory, 
 }
 
 export async function deleteInventory(id: number): Promise<void> {
-  await fetch(`${API_BASE}/api/inventories/${id}`, {
+  const res = await fetch(`${API_BASE}/api/inventories/${id}`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
   });
+  if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
 }
 
 export async function updateInventory(id: number, data: Record<string, unknown>): Promise<BackendInventory> {
   return request<BackendInventory>(`/api/inventories/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ inventory: data }),
-  });
-}
-
-// --- Solana Mint ---
-
-export interface MintResponse {
-  tx_hash: string;
-  explorer_url: string;
-  memo_content: Record<string, unknown>;
-}
-
-export async function mintToSolana(locationId: string, inventoryId: number, customerId?: string): Promise<MintResponse> {
-  return request<MintResponse>('/api/solana/mint', {
-    method: 'POST',
-    body: JSON.stringify({ location_id: locationId, inventory_id: inventoryId, customer_id: customerId }),
   });
 }
 
@@ -184,4 +170,19 @@ export async function listBlueprints(customerId?: string): Promise<BlueprintSumm
 export async function getBlueprint(id: number, customerId?: string): Promise<BlueprintDetail> {
   const cid = customerId || 'anonymous';
   return request<BlueprintDetail>(`/api/payments/blueprint/${id}?customer_id=${encodeURIComponent(cid)}`);
+}
+
+// --- Solana Mint ---
+
+export interface MintResponse {
+  tx_hash: string;
+  explorer_url: string;
+  memo_content: Record<string, unknown>;
+}
+
+export async function mintToSolana(locationId: string, inventoryId: number, customerId?: string): Promise<MintResponse> {
+  return request<MintResponse>('/api/solana/mint', {
+    method: 'POST',
+    body: JSON.stringify({ location_id: locationId, inventory_id: inventoryId, customer_id: customerId }),
+  });
 }

@@ -17,6 +17,7 @@ export interface CompareLocation {
   region: Region;
   location: string;
   energyMix?: string;
+  trendPct?: number;
 }
 
 export const ALL_COMPARE_LOCATIONS: CompareLocation[] = [
@@ -73,7 +74,7 @@ export default function ComparePanel({ selected, onSelectedChange, locations, pr
   const co2NowMap = useMemo(() => {
     const map: Record<string, number> = {};
     for (const loc of selectedLocations) {
-      const features = countryDataToFeatures(loc.carbon, loc.energyMix ?? '40% gas, 30% coal, 20% hydro, 10% other');
+      const features = countryDataToFeatures(loc.carbon, loc.energyMix ?? '40% gas, 30% coal, 20% hydro, 10% other', loc.trendPct);
       map[loc.id] = Math.round(predictCO2(features));
     }
     return map;
@@ -83,7 +84,7 @@ export default function ComparePanel({ selected, onSelectedChange, locations, pr
     const map: Record<string, number> = {};
     const yr = activeYear > 2025 ? activeYear : 2050;
     for (const loc of selectedLocations) {
-      const features = countryDataToFeatures(loc.carbon, loc.energyMix ?? '40% gas, 30% coal, 20% hydro, 10% other');
+      const features = countryDataToFeatures(loc.carbon, loc.energyMix ?? '40% gas, 30% coal, 20% hydro, 10% other', loc.trendPct);
       map[loc.id] = Math.round(predictCO2AtYear(features, yr, SCENARIOS[activeScenario]));
     }
     return map;

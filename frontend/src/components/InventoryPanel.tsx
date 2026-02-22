@@ -1,4 +1,4 @@
-import { Package, Globe, Moon, Orbit, Trash2, MapPin, Zap, CheckCircle, Loader2 } from 'lucide-react';
+import { Package, Globe, Moon, Orbit, Trash2, MapPin, Zap, CheckCircle, Loader2, FileText } from 'lucide-react';
 
 export interface InventoryItem {
   id: string;          // location_id (for dedup + location lookup)
@@ -13,6 +13,7 @@ export interface InventoryItem {
   carbonFootprint: number;
   monthlyCost: number;
   solanaTxHash?: string;
+  hasBlueprint?: boolean;
 }
 
 const bodyIcons: Record<string, React.ReactNode> = {
@@ -26,11 +27,12 @@ interface Props {
   items: InventoryItem[];
   onRemove: (id: string) => void;
   onItemClick: (item: InventoryItem) => void;
+  onViewBlueprint?: (item: InventoryItem) => void;
   onMint?: (item: InventoryItem) => void;
   mintingId?: string | null;
 }
 
-export default function InventoryPanel({ items, onRemove, onItemClick, onMint, mintingId }: Props) {
+export default function InventoryPanel({ items, onRemove, onItemClick, onViewBlueprint, onMint, mintingId }: Props) {
   const totals = {
     capacity: items.reduce((s, i) => s + i.capacityMW, 0),
     avgUtil: items.length ? Math.round(items.reduce((s, i) => s + i.utilization, 0) / items.length) : 0,
@@ -81,6 +83,15 @@ export default function InventoryPanel({ items, onRemove, onItemClick, onMint, m
                     <span className="text-sm font-semibold text-foreground">{item.name}</span>
                   </div>
                   <div className="flex items-center gap-1">
+                    {item.hasBlueprint && onViewBlueprint && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onViewBlueprint(item); }}
+                        className="text-emerald-400/70 hover:text-emerald-400 transition-colors p-1"
+                        title="View Blueprint"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
                       onClick={(e) => { e.stopPropagation(); onItemClick(item); }}
                       className="text-muted-foreground hover:text-white/70 transition-colors p-1"

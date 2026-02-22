@@ -3,11 +3,10 @@
 class CreatePaymentLinkInput < Anthropic::BaseModel
   required :location_id, String
   required :location_name, String
-  optional :customer_email, String
 end
 
 class CreatePaymentLink < Anthropic::BaseTool
-  description "Create a Stripe payment link for purchasing a detailed data center blueprint. Use this when a user wants to buy a full feasibility blueprint for a specific location. Returns a payment URL the user can click to complete the purchase ($299)."
+  description "Create a Stripe payment link for purchasing a detailed data center blueprint. Use this when a user wants to buy a full feasibility blueprint for a specific location. Returns a payment URL the user can click to complete the purchase ($299). Do NOT ask the user for their email — just create the link directly."
 
   input_schema CreatePaymentLinkInput
 
@@ -21,8 +20,7 @@ class CreatePaymentLink < Anthropic::BaseTool
     location = LocationService.find(input.location_id)
     return { error: "Location '#{input.location_id}' not found." }.to_json unless location
 
-    # Create a Stripe Checkout Session
-    session_params = {
+    session = Stripe::Checkout::Session.create(
       payment_method_types: ['card'],
       line_items: [
         {
@@ -41,18 +39,23 @@ class CreatePaymentLink < Anthropic::BaseTool
       mode: 'payment',
       metadata: {
         location_id: input.location_id,
-        customer_id: input.respond_to?(:customer_email) && input.customer_email.present? ? input.customer_email : 'anonymous',
-        user_email: input.respond_to?(:customer_email) ? input.customer_email : nil
+        location_name: input.location_name,
+        customer_id: 'anonymous'
       },
       success_url: ENV['STRIPE_SUCCESS_URL'] || 'https://orbital-atlas.app/success?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: ENV['STRIPE_CANCEL_URL'] || 'https://orbital-atlas.app/cancel'
-    }
+    )
 
-    if input.respond_to?(:customer_email) && input.customer_email.present?
-      session_params[:customer_email] = input.customer_email
-    end
-
-    session = Stripe::Checkout::Session.create(session_params)
+    # Also record pending payment in DB
+    BlueprintPayment.create!(
+      location_id: input.location_id,
+      customer_id: 'anonymous',
+      stripe_session_id: session.id,
+      location_name: input.location_name,
+      amount_cents: BLUEPRINT_PRICE_CENTS,
+      currency: 'usd',
+      status: 'pending'
+    )
 
     {
       payment_url: session.url,
@@ -60,7 +63,7 @@ class CreatePaymentLink < Anthropic::BaseTool
       location_id: input.location_id,
       location_name: input.location_name,
       amount: "$#{(BLUEPRINT_PRICE_CENTS / 100.0).round(2)}",
-      message: "Payment link created! The user can complete their blueprint purchase at the URL above."
+      message: "Payment link created! Click the link to complete your blueprint purchase."
     }.to_json
   rescue Stripe::StripeError => e
     { error: "Stripe error: #{e.message}" }.to_json

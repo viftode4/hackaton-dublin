@@ -11,7 +11,15 @@ module Api
 
       history = params[:history] || []
 
-      result = ClaudeService.chat(params[:message], [], history)
+      # Inject current location context into the message if provided
+      message = params[:message]
+      if params[:location_context].present?
+        ctx = params[:location_context]
+        context_prefix = "\n\n[Context: The user is currently viewing #{ctx[:name] || ctx['name']} (#{ctx[:body] || ctx['body']}). Location data: #{ctx.to_json}]\n\n"
+        message = context_prefix + message
+      end
+
+      result = ClaudeService.chat(message, [], history)
 
       if result[:error]
         render json: { error: result[:error] }, status: :unprocessable_entity

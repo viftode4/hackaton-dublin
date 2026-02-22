@@ -8,6 +8,11 @@ module Api
     def scorecard
       location = LocationService.find(params[:location_id])
 
+      # Accept inline location data for live satellites / dynamic locations not in the store
+      if !location && params[:location_data].present?
+        location = params[:location_data].to_unsafe_h.deep_symbolize_keys
+      end
+
       unless location
         return render json: { error: "Location not found: #{params[:location_id]}" },
                       status: :not_found
@@ -34,6 +39,11 @@ module Api
     # Generates a detailed blueprint for a location (PAID — requires Stripe payment)
     def blueprint
       location = LocationService.find(params[:location_id])
+
+      # Accept inline location data for live satellites / dynamic locations not in the store
+      if !location && params[:location_data].present?
+        location = params[:location_data].to_unsafe_h.deep_symbolize_keys
+      end
 
       unless location
         return render json: { error: "Location not found: #{params[:location_id]}" },
@@ -64,6 +74,15 @@ module Api
           tokens_used: result[:tokens_used] || 0,
           cost_usd: result[:cost_usd] || 0
         )
+
+        # Store generated blueprint content in the payment record
+        payment = BlueprintPayment.paid.for_customer(customer_id).for_location(params[:location_id]).order(paid_at: :desc).first
+        if payment
+          payment.update(
+            blueprint_content: result.to_json,
+            location_name: location[:name] || params[:location_id]
+          )
+        end
       end
 
       render json: result

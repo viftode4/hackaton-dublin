@@ -1,15 +1,16 @@
 // frontend/src/lib/regression-model.ts
-// New model (MAE 51.1, R²=0.896) — 6 features, all derivable from country_ci + energy mix
+// 8-feature Ridge Regression model with temporal features (MAE 50.1, R²=0.895)
 
 // ── Model coefficients from trained_model.json ──────────────────────
 const MODEL = {
   features: [
     'country_ci', 'emaps_zone_ci', 'sqrt_zone_ci',
     'zone_x_country', 'country_ci_sq', 'country_coal_frac',
+    'country_trend_pct', 'local_trend_x_ci',
   ],
-  scaler_mean: [364.878, 362.808, 17.756, 190.842, 192.305, 0.224],
-  scaler_scale: [243.247, 241.307, 6.893, 210.740, 212.303, 0.243],
-  coefficients: [50.404, 50.659, 113.527, -29.055, -28.720, 55.165],
+  scaler_mean: [364.878, 362.808, 17.756, 190.842, 192.305, 0.224, -8.305, -4.686],
+  scaler_scale: [243.247, 241.307, 6.893, 210.741, 212.303, 0.243, 17.039, 18.200],
+  coefficients: [56.895, 51.305, 103.198, -29.362, -24.288, 51.360, 3.448, -16.730],
   intercept: 333.214,
 } as const;
 
@@ -31,19 +32,25 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
 
 // ── Feature vector for a single location ────────────────────────────
 export interface LocationFeatures {
-  country_ci: number;      // country-level carbon intensity (gCO₂/kWh)
-  emaps_zone_ci: number;   // zone-level carbon intensity
-  country_coal_frac: number; // fraction of electricity from coal (0-1)
+  country_ci: number;            // country-level carbon intensity (gCO₂/kWh)
+  emaps_zone_ci: number;         // zone-level carbon intensity
+  country_coal_frac: number;     // fraction of electricity from coal (0-1)
+  country_trend_pct?: number;    // national emission trend (%/yr), e.g. -8 = declining 8%/yr
 }
 
 // ── Core prediction ─────────────────────────────────────────────────
 export function predictCO2(features: LocationFeatures): number {
   const { country_ci, emaps_zone_ci, country_coal_frac } = features;
+  const trendPct = features.country_trend_pct ?? 0;
 
   // Derived features (matching training pipeline in geo_estimator.py)
   const sqrt_zone_ci = Math.sqrt(Math.max(0, emaps_zone_ci));
   const zone_x_country = emaps_zone_ci * country_ci / 1000;
   const country_ci_sq = country_ci ** 2 / 1000;
+
+  // Temporal: local_trend_x_ci = (trend_pct / 100) * country_ci
+  // This matches the backend fallback when no local plant data is available
+  const local_trend_x_ci = (trendPct / 100) * country_ci;
 
   const raw = [
     country_ci,
@@ -52,6 +59,8 @@ export function predictCO2(features: LocationFeatures): number {
     zone_x_country,
     country_ci_sq,
     country_coal_frac,
+    trendPct,
+    local_trend_x_ci,
   ];
 
   let prediction = MODEL.intercept;
@@ -75,10 +84,15 @@ export function projectFeatures(
   const coalFactor = Math.pow(1 - scenario.coalDeclineRate, dt);
   const ciDecay = 1 - (1 - coalFactor) * 0.8;
 
+  // Trend magnitude decays as grids clean up (trend approaches 0 over time)
+  const baseTrend = base.country_trend_pct ?? 0;
+  const trendDecay = Math.pow(0.97, dt); // trend weakens ~3%/yr
+
   return {
     country_ci: base.country_ci * ciDecay,
     emaps_zone_ci: base.emaps_zone_ci * ciDecay,
     country_coal_frac: Math.max(0, base.country_coal_frac * coalFactor),
+    country_trend_pct: baseTrend * trendDecay,
   };
 }
 
@@ -96,6 +110,7 @@ export function predictCO2AtYear(
 export function countryDataToFeatures(
   co2Intensity: number,
   energyMix: string,
+  countryTrendPct?: number,
 ): LocationFeatures {
   const coalFrac = parseCoalFraction(energyMix);
 
@@ -103,6 +118,7 @@ export function countryDataToFeatures(
     country_ci: co2Intensity,
     emaps_zone_ci: co2Intensity, // approximate: zone CI ≈ country CI
     country_coal_frac: coalFrac,
+    country_trend_pct: countryTrendPct,
   };
 }
 
