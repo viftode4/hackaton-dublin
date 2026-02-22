@@ -7,3 +7,8 @@ backend/tmp/
 backend/log/
 node_modules/
 scripts/preprocess/tmp/
+
+# Python cache
+__pycache__/
+*.pyc
+.cache/

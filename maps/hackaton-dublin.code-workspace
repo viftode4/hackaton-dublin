@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../codecarbon"
+		},
+		{
+			"path": "../electricitymaps-contrib"
+		},
+		{
+			"path": "../../docs_ag"
+		},
+		{
+			"path": "../datasets_tracer"
+		}
+	],
+	"settings": {}
+}

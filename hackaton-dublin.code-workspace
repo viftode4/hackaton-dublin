@@ -1,0 +1,22 @@
+{
+    "folders": [
+        {
+            "path": "../datasets_tracer"
+        },
+        {
+            "path": "../codecarbon"
+        },
+        {
+            "path": "../electricitymaps-contrib"
+        },
+        {
+            "path": "../methodology-documents"
+        },
+        {
+            "path": "../watttime-python-client"
+        },
+        {
+            "path": "."
+        }
+    ]
+}
