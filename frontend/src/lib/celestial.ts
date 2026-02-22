@@ -35,8 +35,7 @@ export const CELESTIAL_CONFIGS: Record<CelestialBody, CelestialConfig> = {
   moon: {
     id: 'moon',
     name: 'Moon',
-    textureUrl: '/textures/moon-nasa.jpg',
-    bumpUrl: '/textures/moon-bump.jpg',
+    textureUrl: '/textures/moon.jpg',
     backgroundUrl: '//unpkg.com/three-globe/example/img/night-sky.png',
     atmosphereColor: '#888888',
     showAtmosphere: false,
