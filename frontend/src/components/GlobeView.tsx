@@ -90,7 +90,8 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [countries, setCountries] = useState<any[]>([]);
   const [countryCO2, setCountryCO2] = useState<Map<string, CO2Estimate>>(new Map());
-  const [clickedPin, setClickedPin] = useState<{ lat: number; lng: number; name: string; co2: number } | null>(null);
+  const [clickedPin, _setClickedPin] = useState<{ lat: number; lng: number; name: string; co2: number } | null>(null);
+  const setClickedPin = (v: typeof clickedPin) => { console.log('[setClickedPin]', v, new Error().stack?.split('\n').slice(1, 3).join(' <- ')); _setClickedPin(v); };
   const [camera, setCamera] = useState({ lat: 30, lng: 0, altitude: 2.5 });
   const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastZoomUpdateRef = useRef(0);
@@ -343,6 +344,8 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   // Instead, use native click + toGlobeCoords() for accurate raycasting from actual click position
   const handleGlobeClickRef = useRef<(lat: number, lng: number) => void>(() => {});
   handleGlobeClickRef.current = (lat: number, lng: number) => {
+    // eslint-disable-next-line no-console
+    console.log('[handleGlobeClick] called with:', lat.toFixed(4), lng.toFixed(4), new Error().stack?.split('\n').slice(1, 4).join(' <- '));
     const c = globeRef.current?.controls();
     if (c) c.autoRotate = false;
 
@@ -793,6 +796,13 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
                 </button>
               );
             })}
+          </div>
+          <div className="border-t border-border/50 pt-2 space-y-1">
+            <p className="text-muted-foreground font-medium text-[9px] uppercase tracking-wider">Carbon Score</p>
+            <div className="h-1.5 w-full rounded-full" style={{ background: 'linear-gradient(to right, hsl(120,80%,55%), hsl(60,80%,55%), hsl(0,80%,55%))' }} />
+            <div className="flex justify-between text-muted-foreground text-[8px]">
+              <span>Low (Clean)</span><span>High</span>
+            </div>
           </div>
         </div>
       )}
