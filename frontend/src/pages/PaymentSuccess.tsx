@@ -35,7 +35,7 @@ export default function PaymentSuccess() {
               <CheckCircle2 className="w-8 h-8 text-[hsl(var(--success))]" />
             </div>
             <div className="space-y-2">
-              <h1 className="text-xl font-semibold text-foreground">Payment Successful!</h1>
+              <h1 className="text-xl font-semibold text-foreground font-mono">Payment Successful!</h1>
               <p className="text-sm text-muted-foreground">
                 Your blueprint is now unlocked.
                 {locationId && <> Location: <strong>{locationId}</strong></>}

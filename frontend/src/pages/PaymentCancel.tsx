@@ -12,7 +12,7 @@ export default function PaymentCancel() {
           <XCircle className="w-8 h-8 text-destructive" />
         </div>
         <div className="space-y-2">
-          <h1 className="text-xl font-semibold text-foreground">Payment Cancelled</h1>
+          <h1 className="text-xl font-semibold text-foreground font-mono">Payment Cancelled</h1>
           <p className="text-sm text-muted-foreground">
             No charge was made. You can try again anytime.
           </p>

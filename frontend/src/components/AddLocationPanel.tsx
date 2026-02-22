@@ -144,7 +144,7 @@ export default function AddLocationPanel({ onAdd, onBulkAdd }: Props) {
   return (
     <div className="h-full flex flex-col p-5 overflow-y-auto">
       <div className="flex items-center gap-2 mb-5">
-        <Plus className="w-5 h-5 text-primary" />
+        <Plus className="w-5 h-5 text-white/50" />
         <h2 className="text-lg font-semibold text-foreground">Add Location</h2>
       </div>
 
@@ -169,7 +169,7 @@ export default function AddLocationPanel({ onAdd, onBulkAdd }: Props) {
                 onClick={() => selectCity(city)}
                 className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-left transition-colors hover:bg-muted"
               >
-                <MapPin className="w-3 h-3 text-primary shrink-0" />
+                <MapPin className="w-3 h-3 text-white/50 shrink-0" />
                 <span className="text-foreground font-medium">{city.name}</span>
                 <span className="text-muted-foreground">{city.country}</span>
                 <span className="ml-auto text-[9px] text-muted-foreground font-mono">
@@ -206,9 +206,9 @@ export default function AddLocationPanel({ onAdd, onBulkAdd }: Props) {
       </div>
 
       {selectedCity && (
-        <div className="flex items-center gap-1.5 mb-4 px-2 py-1.5 rounded-md bg-primary/10 border border-primary/20">
-          <Zap className="w-3 h-3 text-primary" />
-          <span className="text-[10px] text-primary">Coordinates auto-filled from {selectedCity.name}</span>
+        <div className="flex items-center gap-1.5 mb-4 px-2 py-1.5 rounded-md bg-white/[0.06] border border-white/10">
+          <Zap className="w-3 h-3 text-white/50" />
+          <span className="text-[10px] text-white/50">Coordinates auto-filled from {selectedCity.name}</span>
         </div>
       )}
 
@@ -271,13 +271,13 @@ export default function AddLocationPanel({ onAdd, onBulkAdd }: Props) {
         {csvResult && (
           <div className={`mt-3 p-2.5 rounded-md text-xs ${csvResult.count > 0 ? 'bg-success/10 border border-success/20' : 'bg-destructive/10 border border-destructive/20'}`}>
             {csvResult.count > 0 && (
-              <div className="flex items-center gap-1.5 text-success mb-1">
+              <div className="flex items-center gap-1.5 text-white/70 mb-1">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span className="font-medium">{csvResult.count} location{csvResult.count !== 1 ? 's' : ''} imported</span>
               </div>
             )}
             {csvResult.errors.map((err, i) => (
-              <div key={i} className="flex items-center gap-1.5 text-destructive">
+              <div key={i} className="flex items-center gap-1.5 text-white/40">
                 <AlertCircle className="w-3 h-3 shrink-0" />
                 <span>{err}</span>
               </div>

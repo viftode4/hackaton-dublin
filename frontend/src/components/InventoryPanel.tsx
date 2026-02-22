@@ -41,7 +41,7 @@ export default function InventoryPanel({ items, onRemove, onItemClick, onMint, m
   return (
     <div className="h-full flex flex-col p-5 overflow-y-auto">
       <div className="flex items-center gap-2 mb-4">
-        <Package className="w-5 h-5 text-primary" />
+        <Package className="w-5 h-5 text-white/50" />
         <h2 className="text-lg font-semibold text-foreground">Inventory</h2>
         <span className="ml-auto text-xs text-muted-foreground">{items.length} sites</span>
       </div>
@@ -72,7 +72,7 @@ export default function InventoryPanel({ items, onRemove, onItemClick, onMint, m
             {items.map(item => (
               <div
                 key={item.id}
-                className="bg-muted rounded-lg p-4 border border-transparent hover:border-primary/30 transition-colors cursor-pointer"
+                className="bg-muted rounded-lg p-4 border border-transparent hover:border-white/20 transition-colors cursor-pointer"
                 onClick={() => onItemClick(item)}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -83,7 +83,7 @@ export default function InventoryPanel({ items, onRemove, onItemClick, onMint, m
                   <div className="flex items-center gap-1">
                     <button
                       onClick={(e) => { e.stopPropagation(); onItemClick(item); }}
-                      className="text-muted-foreground hover:text-primary transition-colors p-1"
+                      className="text-muted-foreground hover:text-white/70 transition-colors p-1"
                       title="Zoom to location"
                     >
                       <MapPin className="w-3.5 h-3.5" />
@@ -94,7 +94,7 @@ export default function InventoryPanel({ items, onRemove, onItemClick, onMint, m
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="text-green-500 hover:text-green-400 transition-colors p-1"
+                        className="text-white/50 hover:text-white/70 transition-colors p-1"
                         title="View on Solana Explorer"
                       >
                         <CheckCircle className="w-3.5 h-3.5" />
@@ -103,7 +103,7 @@ export default function InventoryPanel({ items, onRemove, onItemClick, onMint, m
                       <button
                         onClick={(e) => { e.stopPropagation(); onMint(item); }}
                         disabled={mintingId === item.id}
-                        className="text-muted-foreground hover:text-purple-400 transition-colors p-1 disabled:opacity-50"
+                        className="text-muted-foreground hover:text-white/60 transition-colors p-1 disabled:opacity-50"
                         title="Mint on Solana"
                       >
                         {mintingId === item.id
@@ -113,7 +113,7 @@ export default function InventoryPanel({ items, onRemove, onItemClick, onMint, m
                     ) : null}
                     <button
                       onClick={(e) => { e.stopPropagation(); onRemove(item.id); }}
-                      className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                      className="text-muted-foreground hover:text-white/40 transition-colors p-1"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -126,10 +126,10 @@ export default function InventoryPanel({ items, onRemove, onItemClick, onMint, m
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="inline-flex items-center gap-1 text-[10px] text-green-500 hover:text-green-400 bg-green-500/10 rounded px-1.5 py-0.5 mb-1 transition-colors"
+                    className="inline-flex items-center gap-1 text-[10px] text-white/50 hover:text-white/70 bg-white/[0.06] rounded px-1.5 py-0.5 mb-1 transition-colors"
                   >
                     <span>On-chain</span>
-                    <span className="text-green-500/70">{item.solanaTxHash.slice(0, 8)}…</span>
+                    <span className="text-white/30">{item.solanaTxHash.slice(0, 8)}…</span>
                   </a>
                 )}
                 <div className="grid grid-cols-4 gap-2 text-center">

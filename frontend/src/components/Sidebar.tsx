@@ -55,11 +55,11 @@ export default function Sidebar({ regions, satellites, onRoutingComplete }: Prop
     return () => clearInterval(interval);
   }, [aiAnalysis]);
 
-  const rankColors = ['text-yellow-400', 'text-gray-300', 'text-amber-600'];
+  const rankColors = ['text-white', 'text-white/60', 'text-white/40'];
   const rankLabels = ['1st', '2nd', '3rd'];
 
   return (
-    <div className="h-full flex flex-col p-5 overflow-y-auto bg-card">
+    <div className="h-full flex flex-col p-5 overflow-y-auto bg-black">
       {/* API Settings */}
       <button onClick={() => setShowSettings(!showSettings)} className="flex items-center gap-1.5 text-xs text-muted-foreground mb-3 hover:text-foreground transition-colors">
         <Settings className="w-3.5 h-3.5" />
@@ -73,15 +73,15 @@ export default function Sidebar({ regions, satellites, onRoutingComplete }: Prop
       )}
 
       {/* Datacenter Description */}
-      <h2 className="text-lg font-semibold text-primary mb-3">Describe the Datacenter You Want to Build</h2>
+      <h2 className="text-lg font-semibold text-white/70 mb-3">Describe the Datacenter You Want to Build</h2>
       <Textarea placeholder="e.g. A 50MW hyperscale facility optimized for AI training with renewable energy targets..." value={description} onChange={e => setDescription(e.target.value)} className="mb-4 bg-input border-border min-h-[80px] text-sm resize-none" />
 
       {/* Priority Sliders */}
       <p className="text-xs text-muted-foreground mb-3 uppercase tracking-wider">Investigation Priorities</p>
       <div className="space-y-4 mb-5">
-        <PrioritySlider label="Carbon Neutrality" value={carbonWeight} onChange={setCarbonWeight} color="text-success" />
-        <PrioritySlider label="Other Emissions (NOₓ, PM₂.₅, Water)" value={emissionsWeight} onChange={setEmissionsWeight} color="text-primary" />
-        <PrioritySlider label="Cost Efficiency" value={costWeight} onChange={setCostWeight} color="text-warning" />
+        <PrioritySlider label="Carbon Neutrality" value={carbonWeight} onChange={setCarbonWeight} color="text-white/70" />
+        <PrioritySlider label="Other Emissions (NOₓ, PM₂.₅, Water)" value={emissionsWeight} onChange={setEmissionsWeight} color="text-white/50" />
+        <PrioritySlider label="Cost Efficiency" value={costWeight} onChange={setCostWeight} color="text-white/30" />
       </div>
 
       <Button onClick={handleCompute} disabled={isComputing} className="w-full h-11 text-sm font-semibold mb-1.5">
@@ -96,18 +96,18 @@ export default function Sidebar({ regions, satellites, onRoutingComplete }: Prop
       {/* Results */}
       {results && (
         <div className="animate-slide-up mb-6 space-y-3">
-          <h2 className="text-lg font-semibold text-primary mb-3">Recommended Locations</h2>
+          <h2 className="text-lg font-semibold text-white/70 mb-3">Recommended Locations</h2>
           {results.map((rec, i) => (
             <button
               key={rec.id}
               onClick={() => onRoutingComplete({ lat: rec.lat, lng: rec.lng })}
-              className="w-full text-left bg-muted rounded-lg p-4 hover:bg-muted/80 transition-colors border border-transparent hover:border-primary/30"
+              className="w-full text-left bg-muted rounded-lg p-4 hover:bg-muted/80 transition-colors border border-transparent hover:border-white/20"
             >
               <div className="flex items-center gap-2 mb-2">
                 <Trophy className={`w-4 h-4 ${rankColors[i]}`} />
                 <span className={`text-xs font-bold ${rankColors[i]}`}>{rankLabels[i]}</span>
                 <span className="text-foreground font-semibold text-sm">{rec.name}</span>
-                <span className={`ml-auto px-2 py-0.5 text-[10px] font-semibold rounded ${rec.isOrbital ? 'bg-primary/20 text-primary' : 'bg-success/20 text-success'}`}>
+                <span className={`ml-auto px-2 py-0.5 text-[10px] font-semibold rounded ${rec.isOrbital ? 'bg-white/[0.06] text-white/70' : 'bg-white/[0.03] text-white/50'}`}>
                   {rec.isOrbital ? 'ORBITAL' : 'GROUND'}
                 </span>
               </div>
@@ -130,12 +130,12 @@ export default function Sidebar({ regions, satellites, onRoutingComplete }: Prop
 
       {/* AI Analysis */}
       {results && (
-        <div className="border-l-2 border-primary pl-3 mb-6 animate-slide-up">
+        <div className="border-l-2 border-white/20 pl-3 mb-6 animate-slide-up">
           <p className="text-[10px] text-muted-foreground mb-1.5">AI Analysis</p>
           {typedText ? (
-            <p className="text-sm text-foreground leading-relaxed">{typedText}<span className="animate-pulse text-primary">▊</span></p>
+            <p className="text-sm text-foreground leading-relaxed">{typedText}<span className="animate-pulse text-white/50">▊</span></p>
           ) : !apiKey ? (
-            <p className="text-xs text-warning">Add your Crusoe API key in settings to enable AI analysis</p>
+            <p className="text-xs text-white/30">Add your Crusoe API key in settings to enable AI analysis</p>
           ) : (
             <p className="text-xs text-muted-foreground animate-pulse">Analyzing locations...</p>
           )}
@@ -145,7 +145,7 @@ export default function Sidebar({ regions, satellites, onRoutingComplete }: Prop
       {/* Footer */}
       <div className="mt-auto pt-6">
         <div className="flex items-center gap-1.5 mb-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+          <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-pulse" />
           <span className="text-[10px] text-muted-foreground">Live orbital data · Live carbon feeds</span>
         </div>
         <p className="text-[9px] text-muted-foreground/60">Built at HackEurope 2025 · Sustainability Track · Crusoe Inference Prize</p>
@@ -171,10 +171,10 @@ function PrioritySlider({ label, value, onChange, color }: {
 
 function RatingBadge({ label, rating, value }: { label: string; rating: string; value?: string }) {
   const colorMap: Record<string, string> = {
-    'Excellent': 'text-success',
-    'Good': 'text-primary',
-    'Fair': 'text-warning',
-    'Poor': 'text-destructive',
+    'Excellent': 'text-white/90',
+    'Good': 'text-white/70',
+    'Fair': 'text-white/50',
+    'Poor': 'text-white/30',
   };
   return (
     <div className="text-center">

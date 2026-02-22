@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,38 +6,38 @@
 
 @layer base {
   :root {
-    --background: 224 56% 7%;
-    --foreground: 210 20% 90%;
-    --card: 222 40% 10%;
-    --card-foreground: 210 20% 90%;
-    --popover: 222 40% 10%;
-    --popover-foreground: 210 20% 90%;
-    --primary: 187 100% 50%;
-    --primary-foreground: 224 56% 7%;
-    --secondary: 220 40% 13%;
-    --secondary-foreground: 210 20% 85%;
-    --muted: 220 30% 15%;
-    --muted-foreground: 215 15% 55%;
-    --accent: 187 80% 40%;
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 3%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 3%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 6%;
+    --secondary-foreground: 0 0% 85%;
+    --muted: 0 0% 4%;
+    --muted-foreground: 0 0% 50%;
+    --accent: 0 0% 6%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
+    --destructive: 0 0% 40%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 20% 20%;
-    --input: 220 25% 15%;
-    --ring: 187 100% 50%;
+    --border: 0 0% 10%;
+    --input: 0 0% 4%;
+    --ring: 0 0% 30%;
     --radius: 0.5rem;
 
-    --warning: 38 92% 50%;
-    --success: 142 71% 45%;
+    --warning: 0 0% 60%;
+    --success: 0 0% 70%;
 
-    --sidebar-background: 222 40% 8%;
-    --sidebar-foreground: 210 20% 85%;
-    --sidebar-primary: 187 100% 50%;
-    --sidebar-primary-foreground: 224 56% 7%;
-    --sidebar-accent: 220 30% 15%;
-    --sidebar-accent-foreground: 210 20% 90%;
-    --sidebar-border: 220 20% 18%;
-    --sidebar-ring: 187 100% 50%;
+    --sidebar-background: 0 0% 2%;
+    --sidebar-foreground: 0 0% 85%;
+    --sidebar-primary: 0 0% 100%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 0 0% 6%;
+    --sidebar-accent-foreground: 0 0% 90%;
+    --sidebar-border: 0 0% 10%;
+    --sidebar-ring: 0 0% 30%;
   }
 }
 
@@ -47,13 +47,13 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: 'Inter', sans-serif;
+    font-family: 'JetBrains Mono', monospace;
   }
 }
 
 @keyframes pulse-glow {
-  0%, 100% { opacity: 1; box-shadow: 0 0 8px hsl(187 100% 50% / 0.5); }
-  50% { opacity: 0.7; box-shadow: 0 0 24px hsl(187 100% 50% / 0.8); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(255,255,255,0.5); }
+  50% { opacity: 0.7; box-shadow: 0 0 24px rgba(255,255,255,0.8); }
 }
 @keyframes slide-up {
   from { transform: translateY(20px); opacity: 0; }
@@ -76,8 +76,8 @@
 }
 
 ::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: hsl(220 25% 8%); }
-::-webkit-scrollbar-thumb { background: hsl(220 20% 22%); border-radius: 3px; }
+::-webkit-scrollbar-track { background: #000; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
 
 /* ===== Variant 1: Mission Control HUD Animations ===== */
 
@@ -97,12 +97,12 @@
 @keyframes hud-enter-left { from { transform: translateX(-80px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes hud-enter-right { from { transform: translateX(80px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes hud-pulse-green {
-  0%, 100% { box-shadow: 0 0 4px #22c55e, 0 0 8px #22c55e80; opacity: 1; }
-  50% { box-shadow: 0 0 8px #22c55e, 0 0 20px #22c55ecc; opacity: 0.7; }
+  0%, 100% { box-shadow: 0 0 4px rgba(255,255,255,0.4), 0 0 8px rgba(255,255,255,0.2); opacity: 1; }
+  50% { box-shadow: 0 0 8px rgba(255,255,255,0.5), 0 0 20px rgba(255,255,255,0.3); opacity: 0.7; }
 }
 @keyframes hud-cta-glow {
-  0%, 100% { box-shadow: 0 0 12px #00e5ff60, 0 0 30px #00e5ff30, inset 0 0 12px #00e5ff10; }
-  50% { box-shadow: 0 0 20px #00e5ff90, 0 0 50px #00e5ff50, inset 0 0 20px #00e5ff20; }
+  0%, 100% { box-shadow: 0 0 12px rgba(255,255,255,0.35), 0 0 30px rgba(255,255,255,0.18), inset 0 0 12px rgba(255,255,255,0.06); }
+  50% { box-shadow: 0 0 20px rgba(255,255,255,0.55), 0 0 50px rgba(255,255,255,0.3), inset 0 0 20px rgba(255,255,255,0.12); }
 }
 @keyframes hud-telemetry-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
 @keyframes hud-grain {
@@ -124,8 +124,8 @@
 
 .hud-scanline {
   position: absolute; left: 0; right: 0; height: 2px;
-  background: linear-gradient(90deg, transparent 0%, #00e5ff40 20%, #00e5ff80 50%, #00e5ff40 80%, transparent 100%);
-  box-shadow: 0 0 12px #00e5ff60, 0 0 30px #00e5ff20;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.25) 20%, rgba(255,255,255,0.5) 50%, rgba(255,255,255,0.25) 80%, transparent 100%);
+  box-shadow: 0 0 12px rgba(255,255,255,0.35), 0 0 30px rgba(255,255,255,0.12);
   animation: hud-scanline 4s linear infinite;
   pointer-events: none; z-index: 20;
 }
@@ -171,10 +171,10 @@
   80% { transform: scale(0.96); } 100% { transform: scale(1); opacity: 1; }
 }
 @keyframes cta-breathe {
-  0%, 100% { box-shadow: 0 0 12px hsl(187 100% 50% / 0.3), 0 0 30px hsl(187 100% 50% / 0.15); }
-  50% { box-shadow: 0 0 20px hsl(187 100% 50% / 0.5), 0 0 50px hsl(187 100% 50% / 0.25); }
+  0%, 100% { box-shadow: 0 0 12px rgba(255,255,255,0.3), 0 0 30px rgba(255,255,255,0.15); }
+  50% { box-shadow: 0 0 20px rgba(255,255,255,0.5), 0 0 50px rgba(255,255,255,0.25); }
 }
-@keyframes status-pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 4px #00e5ff; } 50% { opacity: 0.4; box-shadow: 0 0 12px #00e5ff; } }
+@keyframes status-pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 4px rgba(255,255,255,0.5); } 50% { opacity: 0.4; box-shadow: 0 0 12px rgba(255,255,255,0.5); } }
 @keyframes grain-drift {
   0%, 100% { transform: translate(0, 0); } 10% { transform: translate(-5%, -10%); }
   20% { transform: translate(-15%, 5%); } 30% { transform: translate(7%, -25%); }
@@ -185,7 +185,7 @@
 @keyframes bracket-fade-in { from { opacity: 0; } to { opacity: 0.3; } }
 
 .launch-panel-scanline {
-  background: repeating-linear-gradient(0deg, transparent, transparent 2px, hsl(187 100% 50% / 0.03) 2px, hsl(187 100% 50% / 0.03) 4px);
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,0.03) 2px, rgba(255,255,255,0.03) 4px);
 }
 .launch-grain::after {
   content: ''; position: absolute; inset: -50%; width: 200%; height: 200%;

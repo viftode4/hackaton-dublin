@@ -17,7 +17,7 @@ const tabs: { id: AppTab; label: string; icon: React.ReactNode }[] = [
 
 export default function TopNav({ activeTab, onTabChange }: Props) {
   return (
-    <header className="h-12 flex items-center px-4 bg-card border-b border-border shrink-0">
+    <header className="h-12 flex items-center px-4 bg-black border-b border-white/10 shrink-0">
       {/* Logo */}
       <div className="flex items-center gap-2 mr-8">
         <img src={skylyLogo} alt="Skyly" className="w-7 h-7 rounded" />
@@ -29,10 +29,10 @@ export default function TopNav({ activeTab, onTabChange }: Props) {
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-mono text-[10px] tracking-[0.25em] uppercase font-medium transition-colors ${
               activeTab === tab.id
-                ? 'bg-primary/15 text-primary'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                ? 'bg-white/[0.06] text-white'
+                : 'text-white/25 hover:text-white/60 hover:bg-white/[0.03]'
             }`}
           >
             {tab.icon}
@@ -43,7 +43,7 @@ export default function TopNav({ activeTab, onTabChange }: Props) {
 
       {/* Right side - status */}
       <div className="ml-auto flex items-center gap-2">
-        <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+        <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-pulse" />
         <span className="text-[10px] text-muted-foreground">Live</span>
       </div>
     </header>

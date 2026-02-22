@@ -67,15 +67,15 @@ export default function ChatPanel() {
         {messages.map((msg, i) => (
           <div key={i} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
             {msg.role === 'assistant' && (
-              <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
-                <Bot className="w-3.5 h-3.5 text-primary" />
+              <div className="w-6 h-6 rounded-full bg-white/[0.06] flex items-center justify-center shrink-0 mt-0.5">
+                <Bot className="w-3.5 h-3.5 text-white/50" />
               </div>
             )}
             <div className="max-w-[80%]">
               {msg.tools && msg.tools.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-1">
                   {msg.tools.map((tool, j) => (
-                    <span key={j} className="inline-flex items-center gap-1 text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                    <span key={j} className="inline-flex items-center gap-1 text-[9px] bg-white/[0.06] text-white/50 px-1.5 py-0.5 rounded">
                       <Wrench className="w-2.5 h-2.5" />{tool}
                     </span>
                   ))}
@@ -83,12 +83,12 @@ export default function ChatPanel() {
               )}
               <div className={`rounded-lg px-3 py-2 text-sm ${
                 msg.role === 'user'
-                  ? 'bg-primary text-primary-foreground'
+                  ? 'bg-white/[0.1] text-white/80'
                   : 'bg-muted text-foreground'
               }`}>
                 {msg.content}
                 {msg.role === 'assistant' && isTyping && i === messages.length - 1 && (
-                  <span className="animate-pulse text-primary">▊</span>
+                  <span className="animate-pulse text-white/50">▊</span>
                 )}
               </div>
             </div>
@@ -109,7 +109,7 @@ export default function ChatPanel() {
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}
             placeholder="Ask about datacenter locations..."
-            className="flex-1 bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            className="flex-1 bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-white/30"
           />
           <Button size="icon" onClick={handleSend} disabled={isTyping || !input.trim()}>
             <Send className="w-4 h-4" />

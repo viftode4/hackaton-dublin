@@ -66,7 +66,7 @@ export default function ComparePanel({ selected, onSelectedChange, locations }: 
   return (
     <div className="h-full flex flex-col p-5 overflow-y-auto">
       <div className="flex items-center gap-2 mb-4">
-        <BarChart3 className="w-5 h-5 text-primary" />
+        <BarChart3 className="w-5 h-5 text-white/50" />
         <h2 className="text-lg font-semibold text-foreground">Compare Locations</h2>
       </div>
 
@@ -81,7 +81,7 @@ export default function ComparePanel({ selected, onSelectedChange, locations }: 
               onClick={() => setRegionFilter(r.id)}
               className={`px-2.5 py-1 rounded text-[10px] font-medium transition-colors ${
                 regionFilter === r.id
-                  ? 'bg-primary/20 text-primary border border-primary/40'
+                  ? 'bg-white/[0.06] text-white border border-white/20'
                   : 'bg-muted text-muted-foreground hover:text-foreground border border-transparent'
               }`}
             >
@@ -99,7 +99,7 @@ export default function ComparePanel({ selected, onSelectedChange, locations }: 
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder="Search and add locations..."
-          className="w-full pl-8 pr-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full pl-8 pr-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-white/30"
         />
         {searchQuery.trim() && filteredLocations.length > 0 && (
           <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 max-h-[200px] overflow-y-auto">
@@ -111,11 +111,11 @@ export default function ComparePanel({ selected, onSelectedChange, locations }: 
                   setSearchQuery('');
                 }}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors hover:bg-muted ${
-                  selected.includes(loc.id) ? 'text-primary' : 'text-foreground'
+                  selected.includes(loc.id) ? 'text-white' : 'text-foreground'
                 }`}
               >
                 <span className={`w-2 h-2 rounded-full shrink-0 ${
-                  selected.includes(loc.id) ? 'bg-primary' : 'bg-muted-foreground/40'
+                  selected.includes(loc.id) ? 'bg-white' : 'bg-muted-foreground/40'
                 }`} />
                 <span className="truncate">{loc.name}</span>
                 <span className="ml-auto text-[9px] text-muted-foreground capitalize">{loc.region}</span>
@@ -131,7 +131,7 @@ export default function ComparePanel({ selected, onSelectedChange, locations }: 
           {selected.map(id => {
             const loc = allLocations.find(l => l.id === id);
             return loc ? (
-              <span key={id} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-primary/15 text-primary border border-primary/30">
+              <span key={id} className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-white/[0.06] text-white/70 border border-white/10">
                 {loc.name}
                 <button onClick={() => toggleLocation(id)} className="hover:text-foreground">
                   <X className="w-3 h-3" />
@@ -152,7 +152,7 @@ export default function ComparePanel({ selected, onSelectedChange, locations }: 
               {scorecards.map(sc => (
                 <div key={sc.locationId} className="text-center min-w-0">
                   <p className="text-[10px] font-semibold text-foreground truncate">{sc.locationName}</p>
-                  <p className={`text-xl font-black ${sc.grade.startsWith('A') ? 'text-success' : sc.grade.startsWith('B') ? 'text-primary' : 'text-warning'}`}>
+                  <p className={`text-xl font-black ${sc.grade.startsWith('A') ? 'text-white/90' : sc.grade.startsWith('B') ? 'text-white/60' : 'text-white/30'}`}>
                     {sc.grade}
                   </p>
                 </div>
@@ -172,8 +172,8 @@ export default function ComparePanel({ selected, onSelectedChange, locations }: 
                     const m = sc.metrics[mi];
                     const isWinner = m.score === maxScore;
                     return (
-                      <div key={sc.locationId} className={`rounded-lg p-1.5 text-center ${isWinner ? 'bg-primary/10 border border-primary/30' : 'bg-muted'}`}>
-                        <p className={`text-xs font-bold ${isWinner ? 'text-primary' : 'text-foreground'}`}>{m.score}</p>
+                      <div key={sc.locationId} className={`rounded-lg p-1.5 text-center ${isWinner ? 'bg-white/[0.06] border border-white/20' : 'bg-muted'}`}>
+                        <p className={`text-xs font-bold ${isWinner ? 'text-white' : 'text-foreground'}`}>{m.score}</p>
                         <p className="text-[8px] text-muted-foreground truncate">{m.label}</p>
                       </div>
                     );

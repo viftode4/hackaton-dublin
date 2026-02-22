@@ -90,8 +90,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [countries, setCountries] = useState<any[]>([]);
   const [countryCO2, setCountryCO2] = useState<Map<string, CO2Estimate>>(new Map());
-  const [clickedPin, _setClickedPin] = useState<{ lat: number; lng: number; name: string; co2: number } | null>(null);
-  const setClickedPin = (v: typeof clickedPin) => { console.log('[setClickedPin]', v, new Error().stack?.split('\n').slice(1, 3).join(' <- ')); _setClickedPin(v); };
+  const [clickedPin, setClickedPin] = useState<{ lat: number; lng: number; name: string; co2: number } | null>(null);
   const [camera, setCamera] = useState({ lat: 30, lng: 0, altitude: 2.5 });
   const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastZoomUpdateRef = useRef(0);
@@ -339,8 +338,6 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   // Instead, use native click + toGlobeCoords() for accurate raycasting from actual click position
   const handleGlobeClickRef = useRef<(lat: number, lng: number) => void>(() => {});
   handleGlobeClickRef.current = (lat: number, lng: number) => {
-    // eslint-disable-next-line no-console
-    console.log('[handleGlobeClick] called with:', lat.toFixed(4), lng.toFixed(4), new Error().stack?.split('\n').slice(1, 4).join(' <- '));
     const c = globeRef.current?.controls();
     if (c) c.autoRotate = false;
 
@@ -409,87 +406,13 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     if (!el) return;
     const handler = (e: MouseEvent) => {
       if (!globeRef.current) return;
-      const rd = document.createElement('div');
-      rd.style.cssText = `position:fixed;left:${e.clientX - 5}px;top:${e.clientY - 5}px;width:10px;height:10px;background:red;border-radius:50%;z-index:99999;pointer-events:none;`;
-      document.body.appendChild(rd);
-      setTimeout(() => rd.remove(), 4000);
-      const ctrRect = el.getBoundingClientRect();
       const canvas = globeRef.current.renderer().domElement as HTMLCanvasElement;
-      const cvRect = canvas.getBoundingClientRect();
-      const scEl = canvas.parentElement;
-      const scRect = scEl?.getBoundingClientRect();
-      const xC = e.clientX - ctrRect.left;
-      const yC = e.clientY - ctrRect.top;
-      const xV = e.clientX - cvRect.left;
-      const yV = e.clientY - cvRect.top;
-      const xS = scRect ? e.clientX - scRect.left : -1;
-      const yS = scRect ? e.clientY - scRect.top : -1;
-      const dpr = window.devicePixelRatio || 1;
-      const renderer = globeRef.current.renderer();
-      const cam = globeRef.current.camera();
-      const rendererDPR = renderer.getPixelRatio();
-      // renderer internal CSS size = canvas pixel size / pixelRatio
-      const rW = canvas.width / rendererDPR;
-      const rH = canvas.height / rendererDPR;
-      const rCSS = globeRef.current.toGlobeCoords(xV, yV);
-      // Manual NDC using renderer reported size
-      const ndcX = (xV / rW) * 2 - 1;
-      const ndcY = -(yV / rH) * 2 + 1;
-      // Manual NDC using canvas CSS size
-      const csW = parseFloat(canvas.style.width);
-      const csH = parseFloat(canvas.style.height);
-      const ndcX2 = (xV / csW) * 2 - 1;
-      const ndcY2 = -(yV / csH) * 2 + 1;
-      // eslint-disable-next-line no-console
-      console.log('=== GLOBE CLICK DEBUG ===', {
-        mouse: [e.clientX, e.clientY], dpr, rendererDPR,
-        rendererSize: { w: rW, h: rH },
-        canvasPx: [canvas.width, canvas.height],
-        canvasCSS: [csW, csH],
-        cssCoords: [xV, yV],
-        ndcFromRendererSize: [ndcX, ndcY],
-        ndcFromCanvasCSS: [ndcX2, ndcY2],
-        cameraAspect: (cam as any).aspect,
-        rCSS,
-      });
-      // Reverse projection: where would this lat/lng render on screen?
-      const screenCoords = rCSS ? (globeRef.current as any).getScreenCoords?.(rCSS.lat, rCSS.lng, 0.01) : null;
-      // Also show a BLUE dot where the reverse projection says the pin should render
-      if (screenCoords) {
-        const blueDot = document.createElement('div');
-        blueDot.style.cssText = `position:fixed;left:${cvRect.left + screenCoords.x - 5}px;top:${cvRect.top + screenCoords.y - 5}px;width:10px;height:10px;background:blue;border-radius:50%;z-index:99999;pointer-events:none;`;
-        document.body.appendChild(blueDot);
-        setTimeout(() => blueDot.remove(), 4000);
-      }
-      const prev = document.getElementById('gdb');
-      if (prev) prev.remove();
-      const d = document.createElement('div');
-      d.id = 'gdb';
-      d.style.cssText = 'position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.92);color:#0f0;padding:12px;font:11px/1.5 monospace;z-index:99999;border-radius:8px;white-space:pre;';
-      const ff = (n: number) => n.toFixed(4);
-      const gc = (c: { lat: number; lng: number } | null) => c ? `${c.lat.toFixed(2)}, ${c.lng.toFixed(2)}` : 'null';
-      d.textContent = [
-        `Mouse: ${e.clientX}, ${e.clientY}`,
-        `DPR: ${dpr}  Renderer DPR: ${rendererDPR}`,
-        ``,
-        `Renderer size: ${rW.toFixed(1)} x ${rH.toFixed(1)}`,
-        `Canvas px: ${canvas.width} x ${canvas.height}`,
-        `Canvas CSS: ${csW} x ${csH}`,
-        `Camera aspect: ${(cam as any).aspect?.toFixed(4)}`,
-        ``,
-        `CSS coords: ${xV.toFixed(1)}, ${yV.toFixed(1)}`,
-        `NDC (renderer): ${ff(ndcX)}, ${ff(ndcY)}`,
-        `NDC (CSS):      ${ff(ndcX2)}, ${ff(ndcY2)}`,
-        ``,
-        `toGlobeCoords: ${gc(rCSS)}`,
-        `getScreenCoords: ${screenCoords ? `${screenCoords.x.toFixed(1)}, ${screenCoords.y.toFixed(1)}` : 'N/A'}`,
-        `Click was at:    ${xV.toFixed(1)}, ${yV.toFixed(1)}`,
-        screenCoords ? `OFFSET: ${(screenCoords.x - xV).toFixed(1)}, ${(screenCoords.y - yV).toFixed(1)}` : '',
-      ].join('\n');
-      document.body.appendChild(d);
-      setTimeout(() => d.remove(), 12000);
-      if (rCSS) {
-        handleGlobeClickRef.current(rCSS.lat, rCSS.lng);
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const coords = globeRef.current.toGlobeCoords(x, y);
+      if (coords) {
+        handleGlobeClickRef.current(coords.lat, coords.lng);
       }
     };
     el.addEventListener('click', handler);
@@ -1030,17 +953,16 @@ function createDatacenterElement(d: any, clickRef: React.MutableRefObject<(data:
 
 // Create a pin for a clicked country on the heatmap
 function createClickedPinElement(d: any) {
+  // CSS2DRenderer overrides element.style.transform with translate(-50%,-50%) translate(Xpx,Ypx),
+  // centering the element at the globe point. So the pin dot must be at the element's visual center.
+  // We use position:relative on a zero-size container, with the label absolutely positioned above.
   const el = document.createElement('div');
-  el.style.display = 'flex';
-  el.style.flexDirection = 'column';
-  el.style.alignItems = 'center';
-  el.style.transform = 'translate(-50%, -100%)';
   el.style.pointerEvents = 'none';
   el.style.zIndex = '20';
 
   const color = d.carbon > 0 ? getIntensityColor(d.carbon) : '#00d4ff';
 
-  // Pin marker
+  // Pin marker — this IS the element center (CSS2DRenderer centers on this)
   const pin = document.createElement('div');
   pin.style.width = '12px';
   pin.style.height = '12px';
@@ -1049,9 +971,12 @@ function createClickedPinElement(d: any) {
   pin.style.border = '2px solid #fff';
   pin.style.boxShadow = `0 0 10px ${color}, 0 2px 8px rgba(0,0,0,0.5)`;
 
-  // Label tag
+  // Label tag — positioned above the pin via absolute positioning
   const tag = document.createElement('div');
-  tag.style.marginBottom = '4px';
+  tag.style.position = 'absolute';
+  tag.style.bottom = '16px';
+  tag.style.left = '50%';
+  tag.style.transform = 'translateX(-50%)';
   tag.style.background = 'rgba(10, 14, 26, 0.92)';
   tag.style.backdropFilter = 'blur(8px)';
   tag.style.border = `1px solid ${color}66`;

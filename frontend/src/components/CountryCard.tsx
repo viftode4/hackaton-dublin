@@ -58,7 +58,7 @@ export default function CountryCard({ name, co2, onAddToCompare, onGenerateRepor
 
       {/* Confidence */}
       {co2.confidence < 0.5 && (
-        <p className="text-[10px] text-yellow-500/80">
+        <p className="text-[10px] text-white/30">
           Low confidence — stub data (no ML API configured)
         </p>
       )}
@@ -67,7 +67,7 @@ export default function CountryCard({ name, co2, onAddToCompare, onGenerateRepor
       <div className="flex gap-2 pt-1">
         <button
           onClick={onAddToCompare}
-          className="flex-1 flex items-center justify-center gap-1.5 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 rounded-lg px-3 py-2 text-xs font-medium transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 bg-white/[0.06] hover:bg-white/[0.1] text-white/70 border border-white/10 rounded-lg px-3 py-2 text-xs font-medium transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />
           Add to Compare

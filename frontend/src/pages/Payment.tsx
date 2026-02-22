@@ -58,7 +58,7 @@ export default function Payment() {
             <CheckCircle2 className="w-8 h-8 text-[hsl(var(--success))]" />
           </div>
           <div className="space-y-2">
-            <h1 className="text-xl font-semibold text-foreground">Payment Connected</h1>
+            <h1 className="text-xl font-semibold text-foreground font-mono uppercase tracking-wide">Payment Connected</h1>
             <p className="text-sm text-muted-foreground">
               Your payment method has been successfully verified.
             </p>
@@ -76,7 +76,7 @@ export default function Payment() {
       <div className="w-full max-w-sm space-y-8">
         <div className="flex flex-col items-center gap-3">
           <img src={skylyLogo} alt="Skyly" className="w-14 h-14 rounded-xl" />
-          <h1 className="text-xl font-semibold text-foreground">Payment Details</h1>
+          <h1 className="text-xl font-semibold text-foreground font-mono uppercase tracking-wide">Payment Details</h1>
           <p className="text-sm text-muted-foreground text-center">
             Connect a payment method to activate your account.
           </p>

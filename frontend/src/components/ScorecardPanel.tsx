@@ -28,16 +28,16 @@ const bodyLabels: Record<string, string> = {
 };
 
 function scoreColor(score: number): string {
-  if (score >= 70) return 'hsl(var(--success))';
-  if (score >= 45) return 'hsl(var(--warning))';
-  return 'hsl(var(--destructive))';
+  if (score >= 70) return 'rgba(255,255,255,0.8)';
+  if (score >= 45) return 'rgba(255,255,255,0.5)';
+  return 'rgba(255,255,255,0.25)';
 }
 
 function gradeColor(grade: string): string {
-  if (grade.startsWith('A')) return 'text-success';
-  if (grade.startsWith('B')) return 'text-primary';
-  if (grade.startsWith('C')) return 'text-warning';
-  return 'text-destructive';
+  if (grade.startsWith('A')) return 'text-white/90';
+  if (grade.startsWith('B')) return 'text-white/60';
+  if (grade.startsWith('C')) return 'text-white/40';
+  return 'text-white/20';
 }
 
 export default function ScorecardPanel({ locationId, locationName, body, carbonIntensity, customerId, onClose, onAddToInventory }: Props) {
@@ -89,7 +89,7 @@ export default function ScorecardPanel({ locationId, locationName, body, carbonI
     return (
       <div className="h-full flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          <Loader2 className="w-6 h-6 animate-spin text-white/50" />
           <p className="text-sm text-muted-foreground animate-pulse">Generating scorecard...</p>
         </div>
       </div>
@@ -115,7 +115,7 @@ export default function ScorecardPanel({ locationId, locationName, body, carbonI
       <div className="flex items-start justify-between mb-5">
         <div>
           <div className="flex items-center gap-1.5 mb-1">
-            <span className="text-primary">{bodyIcons[body] ?? <Globe className="w-4 h-4" />}</span>
+            <span className="text-white/50">{bodyIcons[body] ?? <Globe className="w-4 h-4" />}</span>
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
               {bodyLabels[body] ?? body}
             </span>
@@ -147,7 +147,7 @@ export default function ScorecardPanel({ locationId, locationName, body, carbonI
       </div>
 
       {/* Summary — AI-powered if available */}
-      <div className="border-l-2 border-primary/40 pl-3 mb-6">
+      <div className="border-l-2 border-white/20 pl-3 mb-6">
         <p className="text-xs text-muted-foreground mb-1">
           {aiSummary ? 'AI Analysis' : 'Analysis'}
         </p>

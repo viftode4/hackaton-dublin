@@ -59,7 +59,7 @@ export default function Signup() {
       <div className="w-full max-w-sm space-y-8">
         <div className="flex flex-col items-center gap-3">
           <img src={skylyLogo} alt="Skyly" className="w-14 h-14 rounded-xl" />
-          <h1 className="text-xl font-semibold text-foreground">Create your account</h1>
+          <h1 className="text-xl font-semibold text-foreground font-mono uppercase tracking-wide">Create your account</h1>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -132,7 +132,7 @@ export default function Signup() {
 
         <p className="text-center text-sm text-muted-foreground">
           Already have an account?{' '}
-          <Link to="/login" className="text-primary hover:underline">
+          <Link to="/login" className="text-white/50 hover:text-white">
             Sign in
           </Link>
         </p>

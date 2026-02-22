@@ -19,10 +19,10 @@ const SATELLITE_INFO: Record<string, { size: string; mass: string; altitudeKm: n
 };
 
 const BODY_BADGE: Record<string, { label: string; classes: string }> = {
-  earth: { label: 'Earth', classes: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-  orbit: { label: 'Orbit', classes: 'bg-violet-500/20 text-violet-400 border-violet-500/30' },
-  moon: { label: 'Moon', classes: 'bg-slate-400/20 text-slate-300 border-slate-400/30' },
-  mars: { label: 'Mars', classes: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+  earth: { label: 'Earth', classes: 'bg-white/[0.06] text-white/70 border-white/10' },
+  orbit: { label: 'Orbit', classes: 'bg-white/[0.06] text-white/60 border-white/10' },
+  moon: { label: 'Moon', classes: 'bg-white/[0.04] text-white/50 border-white/10' },
+  mars: { label: 'Mars', classes: 'bg-white/[0.04] text-white/40 border-white/10' },
 };
 
 export interface LocationDetail {
@@ -101,8 +101,8 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
       {/* CO2 / Power source */}
       {(isMoon || isMars) && et ? (
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-emerald-400" style={{ boxShadow: '0 0 8px #34d39966' }} />
-          <span className="text-sm font-semibold text-emerald-400">Zero-carbon</span>
+          <div className="w-3 h-3 rounded-full bg-white/50" style={{ boxShadow: '0 0 8px rgba(255,255,255,0.3)' }} />
+          <span className="text-sm font-semibold text-white/70">Zero-carbon</span>
           <span className="text-[10px] text-muted-foreground">{et.powerSource}</span>
         </div>
       ) : (
@@ -112,7 +112,7 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
             {location.carbon} g CO₂/kWh
           </span>
           {location.countryCO2 && location.countryCO2.confidence >= 0.8 && (
-            <span className="text-[9px] px-1.5 py-0.5 bg-primary/20 text-primary border border-primary/30 rounded-full">
+            <span className="text-[9px] px-1.5 py-0.5 bg-white/[0.06] text-white/50 border border-white/10 rounded-full">
               ML predicted
             </span>
           )}
@@ -240,7 +240,7 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
         <div className="bg-muted/40 rounded-lg px-3 py-2 border border-border/50">
           <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">Earth Communication</p>
           <p className="text-xs text-foreground">
-            One-way latency: <span className="font-semibold text-primary">
+            One-way latency: <span className="font-semibold text-white">
               {et.latencyToEarthMs < 5000
                 ? `${(et.latencyToEarthMs / 1000).toFixed(1)}s`
                 : `${(et.latencyToEarthMs / 60000).toFixed(1)} min`}
@@ -351,7 +351,7 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
         <div className="flex gap-2">
           <button
             onClick={onGenerateReport}
-            className="flex-1 flex items-center justify-center gap-1.5 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 rounded-lg px-3 py-2 text-xs font-medium transition-colors"
+            className="flex-1 flex items-center justify-center gap-1.5 bg-white/[0.06] hover:bg-white/[0.1] text-white/70 border border-white/10 rounded-lg px-3 py-2 text-xs font-medium transition-colors"
           >
             <FileText className="w-3.5 h-3.5" />
             Generate Report
@@ -366,7 +366,7 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
         </div>
         <button
           onClick={onAddToInventory}
-          className="w-full flex items-center justify-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 rounded-lg px-3 py-2 text-xs font-medium transition-colors"
+          className="w-full flex items-center justify-center gap-1.5 bg-white/[0.06] hover:bg-white/[0.1] text-white/60 border border-white/10 rounded-lg px-3 py-2 text-xs font-medium transition-colors"
         >
           <Package className="w-3.5 h-3.5" />
           Add to Inventory
