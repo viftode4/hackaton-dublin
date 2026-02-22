@@ -37,6 +37,7 @@ export interface SatelliteData {
   latencyMs?: number;
   apogeeKm?: number;
   perigeeKm?: number;
+  category?: string;
 }
 
 export interface RoutingResult {
