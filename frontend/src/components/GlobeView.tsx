@@ -307,8 +307,10 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     });
   }, [onCountryClick]);
 
-  // Globe surface click — works on all bodies (moon/mars have no polygons to click)
-  const handleGlobeClick = useCallback(({ lat, lng }: { lat: number; lng: number }) => {
+  // Globe surface click — bypass library's onGlobeClick (uses stale pointerPos)
+  // Instead, use native click + toGlobeCoords() for accurate raycasting from actual click position
+  const handleGlobeClickRef = useRef<(lat: number, lng: number) => void>(() => {});
+  handleGlobeClickRef.current = (lat: number, lng: number) => {
     const c = globeRef.current?.controls();
     if (c) c.autoRotate = false;
 
@@ -316,11 +318,9 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     const label = `${lat.toFixed(2)}°, ${lng.toFixed(2)}°`;
 
     if (body === 'earth') {
-      // On Earth, polygon click handles countries — globe click is fallback for ocean areas
       setClickedPin({ lat, lng, name: label, co2: 0 });
       onLocationClick?.(`custom-${lat.toFixed(2)}-${lng.toFixed(2)}`, label, 'earth', 0);
     } else if (body === 'moon' || body === 'mars') {
-      // Find nearest predefined location (snap only if within ~2° — essentially clicking on the pin)
       const DEG2RAD = Math.PI / 180;
       let nearest: ExtraterrestrialLocation | undefined;
       let minDist = Infinity;
@@ -328,11 +328,10 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
         const dLat = (loc.lat - lat) * DEG2RAD;
         const dLng = (loc.lng - lng) * DEG2RAD;
         const a = Math.sin(dLat/2)**2 + Math.cos(lat*DEG2RAD)*Math.cos(loc.lat*DEG2RAD)*Math.sin(dLng/2)**2;
-        const dist = 2 * Math.asin(Math.sqrt(a)) / DEG2RAD; // degrees
+        const dist = 2 * Math.asin(Math.sqrt(a)) / DEG2RAD;
         if (dist < minDist) { minDist = dist; nearest = loc; }
       }
 
-      // Build location data — snap to predefined pin only if very close, otherwise use click coords
       let etData: ExtraterrestrialLocation;
       if (nearest && minDist < 2) {
         etData = nearest;
@@ -367,14 +366,28 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
           }),
         };
       }
-      // Place marker at exact click coordinates (no globe animation to avoid perceived shift)
       setClickedPin({ lat, lng, name: etData.name, co2: etData.carbonIntensity });
       onLocationClick?.(etData.id, etData.name, body, etData.carbonIntensity, undefined, undefined, etData);
-      return;
     }
+  };
 
-    globeRef.current?.pointOfView({ lat, lng, altitude: 1.2 }, 1000);
-  }, [celestialBody, onLocationClick, currentLocations]);
+  // Native click listener — computes fresh raycast from actual click position
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: MouseEvent) => {
+      if (!globeRef.current) return;
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const coords = globeRef.current.toGlobeCoords(x, y);
+      if (coords) {
+        handleGlobeClickRef.current(coords.lat, coords.lng);
+      }
+    };
+    el.addEventListener('click', handler);
+    return () => el.removeEventListener('click', handler);
+  }, []);
 
   // HTML elements: user's datacenter pins on Earth, satellite markers on orbit, plus clicked pin
   const htmlElementsData = useMemo(() => {
@@ -481,7 +494,6 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
           atmosphereColor={config.atmosphereColor}
           atmosphereAltitude={config.atmosphereAltitude}
           showAtmosphere={config.showAtmosphere}
-          onGlobeClick={handleGlobeClick}
           onZoom={handleZoom}
           pointsData={pointsData}
           pointLat="lat" pointLng="lng" pointAltitude="alt"
