@@ -14,8 +14,14 @@ export async function getMoonFeatures(): Promise<MoonFeature[]> {
   try {
     const res = await fetch('/data/moon-features.json');
     if (!res.ok) return [];
-    cachedFeatures = await res.json();
-    return cachedFeatures!;
+    const raw: MoonFeature[] = await res.json();
+    // Normalize: convert 0-360 lng to -180..180, simplify type to first word
+    cachedFeatures = raw.map(f => ({
+      ...f,
+      lng: f.lng > 180 ? f.lng - 360 : f.lng,
+      type: f.type.split(',')[0].trim(),
+    }));
+    return cachedFeatures;
   } catch {
     return [];
   }

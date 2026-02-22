@@ -364,6 +364,18 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
         id: loc.id, name: loc.name, carbon: loc.carbonIntensity,
         loc: loc.location, powerSource: loc.powerSource,
         capacity: loc.capacity, status: loc.status,
+        body: loc.body,
+        illuminationPct: loc.illuminationPct,
+        avgTemperatureC: loc.avgTemperatureC,
+        tempRangeC: loc.tempRangeC,
+        solarIrradianceW: loc.solarIrradianceW,
+        dustStormsPerYear: loc.dustStormsPerYear,
+        elevationKm: loc.elevationKm,
+        latencyToEarthMs: loc.latencyToEarthMs,
+        coolingEfficiency: loc.coolingEfficiency,
+        radiationLevel: loc.radiationLevel,
+        earthVisible: loc.earthVisible,
+        iceProximityKm: loc.iceProximityKm,
         isSatellite: false, isClickedPin: false, isExtraterrestrial: true,
         satData: null as SatelliteData | null,
       }));
@@ -880,13 +892,39 @@ function createExtraterrestrialElement(d: any, clickRef: React.MutableRefObject<
   tag.style.transition = 'opacity 0.2s ease';
   tag.setAttribute('data-et-tag', d.id);
 
+  // Build body-specific metrics
+  let metricsHtml = '';
+  if (d.body === 'moon') {
+    metricsHtml = `
+      ${d.illuminationPct != null ? `<span style="color:#ccd;">Solar:</span> ${d.illuminationPct}% illumination<br/>` : ''}
+      ${d.avgTemperatureC != null ? `<span style="color:#ccd;">Temp:</span> ${d.avgTemperatureC}°C` : ''}
+      ${d.tempRangeC ? ` <span style="color:#667;">(${d.tempRangeC[0]}° to ${d.tempRangeC[1]}°)</span><br/>` : '<br/>'}
+      ${d.earthVisible != null ? `<span style="color:#ccd;">Earth LOS:</span> ${d.earthVisible ? '✓ Direct' : '✗ Relay needed'}<br/>` : ''}
+      ${d.iceProximityKm != null ? `<span style="color:#ccd;">Ice:</span> ${d.iceProximityKm === 0 ? 'On-site' : d.iceProximityKm + ' km'}<br/>` : ''}
+      ${d.coolingEfficiency != null ? `<span style="color:#ccd;">Cooling:</span> ${d.coolingEfficiency}/100<br/>` : ''}
+      ${d.radiationLevel ? `<span style="color:#ccd;">Radiation:</span> ${d.radiationLevel}<br/>` : ''}
+    `;
+  } else if (d.body === 'mars') {
+    metricsHtml = `
+      ${d.solarIrradianceW != null ? `<span style="color:#ccd;">Solar:</span> ${d.solarIrradianceW} W/m²<br/>` : ''}
+      ${d.avgTemperatureC != null ? `<span style="color:#ccd;">Temp:</span> ${d.avgTemperatureC}°C<br/>` : ''}
+      ${d.dustStormsPerYear != null ? `<span style="color:#ccd;">Dust:</span> ${d.dustStormsPerYear} storms/yr<br/>` : ''}
+      ${d.elevationKm != null ? `<span style="color:#ccd;">Elevation:</span> ${d.elevationKm > 0 ? '+' : ''}${d.elevationKm} km<br/>` : ''}
+      ${d.coolingEfficiency != null ? `<span style="color:#ccd;">Cooling:</span> ${d.coolingEfficiency}/100<br/>` : ''}
+      ${d.radiationLevel ? `<span style="color:#ccd;">Radiation:</span> ${d.radiationLevel}<br/>` : ''}
+    `;
+  }
+  const latencyStr = d.latencyToEarthMs != null
+    ? d.latencyToEarthMs < 5000 ? `${(d.latencyToEarthMs / 1000).toFixed(1)}s` : `${Math.round(d.latencyToEarthMs / 60000)} min`
+    : null;
+
   tag.innerHTML = `
     <div style="font-size:10px;font-weight:700;color:${accentColor};margin-bottom:3px;">${d.name}</div>
     <div style="font-size:8px;color:#8899aa;line-height:1.5;">
-      <span style="color:#ccd;">Location:</span> ${d.loc}<br/>
-      <span style="color:#ccd;">Power:</span> ${d.powerSource || 'Solar'}<br/>
-      <span style="color:#ccd;">Capacity:</span> ${d.capacity || 'N/A'}<br/>
-      <span style="color:#ccd;">Status:</span> ${d.status || 'Planned'}
+      <span style="color:#ccd;">Power:</span> ${d.powerSource || 'Solar'} · ${d.capacity || 'N/A'}<br/>
+      ${metricsHtml}
+      ${latencyStr ? `<span style="color:#ccd;">Latency:</span> ${latencyStr}<br/>` : ''}
+      <span style="color:#667;font-style:italic;">${d.status || 'Planned'}</span>
     </div>
   `;
 
