@@ -3,20 +3,7 @@ import { getIntensityColor, type GroundRegion, type SatelliteData } from '@/lib/
 import type { CO2Estimate } from '@/lib/co2-api';
 import type { ExtraterrestrialLocation } from '@/lib/celestial';
 import { computeFeasibility, getFeasibilityColor, getFeasibilityLabel } from '@/lib/feasibility';
-
-/** Info for satellite detail display */
-const SATELLITE_INFO: Record<string, { size: string; mass: string; altitudeKm: number; co2: string }> = {
-  'ISS': { size: '109m x 73m', mass: '420,000 kg', altitudeKm: 408, co2: '200 g CO2/kWh' },
-  'HUBBLE': { size: '13.2m x 4.2m', mass: '11,110 kg', altitudeKm: 547, co2: '150 g CO2/kWh' },
-  'TERRA': { size: '6.8m x 3.5m', mass: '5,190 kg', altitudeKm: 705, co2: '120 g CO2/kWh' },
-  'LANDSAT9': { size: '4.3m x 2.4m', mass: '2,711 kg', altitudeKm: 705, co2: '110 g CO2/kWh' },
-  'NOAA20': { size: '6.2m x 3.3m', mass: '2,445 kg', altitudeKm: 824, co2: '130 g CO2/kWh' },
-  'SENTINEL6': { size: '5.1m x 2.3m', mass: '1,192 kg', altitudeKm: 1336, co2: '100 g CO2/kWh' },
-  'TIANGONG': { size: '55m x 30m', mass: '100,000 kg', altitudeKm: 390, co2: '210 g CO2/kWh' },
-  'STARLINK': { size: '3.4m x 1.8m', mass: '260 kg', altitudeKm: 550, co2: '170 g CO2/kWh' },
-  'GOES16': { size: '6.1m x 5.6m', mass: '5,192 kg', altitudeKm: 35786, co2: '95 g CO2/kWh' },
-  'INMARSAT5': { size: '7.8m x 3.4m', mass: '6,070 kg', altitudeKm: 35786, co2: '85 g CO2/kWh' },
-};
+import { BAND_LABELS, CATEGORY_LABELS, type OrbitalBand, type SatelliteCategory } from '@/lib/satellite-store';
 
 const BODY_BADGE: Record<string, { label: string; classes: string }> = {
   earth: { label: 'Earth', classes: 'bg-white/[0.06] text-white/70 border-white/10' },
@@ -49,11 +36,11 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
   const isOrbit = location.body === 'orbit';
   const isMoon = location.body === 'moon';
   const isMars = location.body === 'mars';
-  const satInfo = isOrbit && location.satellite ? SATELLITE_INFO[location.satellite.id] : undefined;
+  const sat = isOrbit ? location.satellite : undefined;
   const badge = BODY_BADGE[location.body] ?? BODY_BADGE.earth;
   const et = location.extraterrestrial;
 
-  // Compute feasibility score for extraterrestrial locations
+  // Compute feasibility score for all location types
   const feasibility = et ? computeFeasibility({
     body: et.body,
     illumination_pct: et.illuminationPct,
@@ -64,6 +51,19 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
     dust_storms_per_year: et.dustStormsPerYear,
     elevation_km: et.elevationKm,
     construction_cost_mw: et.constructionCostMw,
+  }) : isOrbit && sat ? computeFeasibility({
+    body: 'orbit',
+    eclipse_fraction: sat.eclipseFraction,
+    radiation_level: sat.radiationLevel,
+    power_availability_w: sat.powerAvailabilityW,
+    latency_ms: sat.latencyMs,
+    altitude_km: sat.altitudeKm,
+  }) : location.region ? computeFeasibility({
+    body: 'earth',
+    carbon_intensity_gco2: location.region.carbonIntensity,
+    energy_cost_kwh: location.region.energyCostKwh,
+    disaster_risk: location.region.disasterRisk,
+    political_stability: location.region.politicalStability,
   }) : null;
 
   return (
@@ -80,7 +80,7 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
       <div>
         <div className="flex items-center gap-2">
           <p className="text-xs text-muted-foreground uppercase tracking-wider">
-            {isOrbit ? 'Satellite' : 'Datacenter'}
+            {isOrbit ? 'Orbital Datacenter' : (isMoon || isMars) ? `${location.body} Datacenter` : 'Datacenter'}
           </p>
           <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium border ${badge.classes}`}>
             {badge.label}
@@ -90,8 +90,12 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
         {location.region && (
           <p className="text-xs text-muted-foreground">{location.region.location}</p>
         )}
-        {location.satellite && (
-          <p className="text-xs text-muted-foreground">{location.satellite.status}</p>
+        {sat && (
+          <p className="text-xs text-muted-foreground">
+            {BAND_LABELS[sat.status as OrbitalBand] ?? sat.status}
+            {sat.category ? ` · ${CATEGORY_LABELS[sat.category as SatelliteCategory] ?? sat.category}` : ''}
+            {sat.noradId ? ` · NORAD ${sat.noradId}` : ''}
+          </p>
         )}
         {et && (
           <p className="text-xs text-muted-foreground">{et.location} · {et.powerSource}</p>
@@ -104,6 +108,12 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
           <div className="w-3 h-3 rounded-full bg-white/50" style={{ boxShadow: '0 0 8px rgba(255,255,255,0.3)' }} />
           <span className="text-sm font-semibold text-white/70">Zero-carbon</span>
           <span className="text-[10px] text-muted-foreground">{et.powerSource}</span>
+        </div>
+      ) : isOrbit && sat ? (
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-white/50" style={{ boxShadow: '0 0 8px rgba(255,255,255,0.3)' }} />
+          <span className="text-sm font-semibold text-white/70">Zero-carbon</span>
+          <span className="text-[10px] text-muted-foreground">Solar powered</span>
         </div>
       ) : (
         <div className="flex items-center gap-2">
@@ -119,7 +129,7 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
         </div>
       )}
 
-      {/* Feasibility score bar for Moon/Mars */}
+      {/* Feasibility score bar — computed for all bodies */}
       {feasibility && (
         <div className="bg-muted/60 rounded-lg px-3 py-2.5">
           <div className="flex items-center justify-between mb-2">
@@ -294,34 +304,72 @@ export default function LocationDetailCard({ location, onDismiss, onGenerateRepo
         </div>
       )}
 
-      {/* Orbital info for satellites */}
-      {isOrbit && location.satellite && (
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-muted/60 rounded-lg px-3 py-2">
-            <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Inclination</p>
-            <p className="text-sm font-semibold text-foreground">{location.satellite.inclination}°</p>
-          </div>
-          <div className="bg-muted/60 rounded-lg px-3 py-2">
-            <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Carbon Score</p>
-            <p className="text-sm font-semibold text-foreground">{location.satellite.carbonScore}</p>
-          </div>
-          {satInfo && (
-            <>
+      {/* Orbital datacenter metrics */}
+      {isOrbit && sat && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            {sat.powerAvailabilityW != null && (
+              <div className="bg-muted/60 rounded-lg px-3 py-2">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Solar Power</p>
+                <p className="text-sm font-semibold text-foreground">{sat.powerAvailabilityW} W/m²</p>
+              </div>
+            )}
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Cooling</p>
+              <p className="text-sm font-semibold text-foreground">Vacuum radiative</p>
+            </div>
+            {sat.latencyMs != null && (
+              <div className="bg-muted/60 rounded-lg px-3 py-2">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Ground Latency</p>
+                <p className="text-sm font-semibold text-foreground">{sat.latencyMs.toFixed(1)} ms</p>
+              </div>
+            )}
+            {sat.radiationLevel && (
+              <div className="bg-muted/60 rounded-lg px-3 py-2">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Radiation</p>
+                <p className="text-sm font-semibold text-foreground capitalize">{sat.radiationLevel}</p>
+              </div>
+            )}
+            {sat.eclipseFraction != null && (
+              <div className="bg-muted/60 rounded-lg px-3 py-2">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Eclipse Time</p>
+                <p className="text-sm font-semibold text-foreground">{(sat.eclipseFraction * 100).toFixed(1)}%</p>
+              </div>
+            )}
+            {sat.altitudeKm != null && (
               <div className="bg-muted/60 rounded-lg px-3 py-2">
                 <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Altitude</p>
-                <p className="text-sm font-semibold text-foreground">{satInfo.altitudeKm.toLocaleString()} km</p>
+                <p className="text-sm font-semibold text-foreground">{sat.altitudeKm.toLocaleString()} km</p>
               </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Orbital Band</p>
+              <p className="text-sm font-semibold text-foreground">{BAND_LABELS[sat.status as OrbitalBand] ?? sat.status}</p>
+            </div>
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Inclination</p>
+              <p className="text-sm font-semibold text-foreground">{sat.inclination.toFixed(1)}°</p>
+            </div>
+            {sat.period > 0 && (
               <div className="bg-muted/60 rounded-lg px-3 py-2">
-                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Mass</p>
-                <p className="text-sm font-semibold text-foreground">{satInfo.mass}</p>
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Orbital Period</p>
+                <p className="text-sm font-semibold text-foreground">{(sat.period / 60).toFixed(1)} min</p>
               </div>
+            )}
+            <div className="bg-muted/60 rounded-lg px-3 py-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Live Position</p>
+              <p className="text-sm font-semibold text-foreground">{sat.lat.toFixed(1)}°, {sat.lng.toFixed(1)}°</p>
+            </div>
+            {sat.apogeeKm != null && sat.perigeeKm != null && (
               <div className="bg-muted/60 rounded-lg px-3 py-2 col-span-2">
-                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Emissions</p>
-                <p className="text-sm font-semibold text-foreground">{satInfo.co2}</p>
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Orbit Range</p>
+                <p className="text-sm font-semibold text-foreground">{sat.perigeeKm.toLocaleString()} – {sat.apogeeKm.toLocaleString()} km</p>
               </div>
-            </>
-          )}
-        </div>
+            )}
+          </div>
+        </>
       )}
 
       {/* Regional context — show country grid CO2 if available */}

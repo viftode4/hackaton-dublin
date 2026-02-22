@@ -12,8 +12,17 @@ export interface TLERecord {
   RA_OF_ASC_NODE: number;
   ARG_OF_PERICENTER: number;
   MEAN_ANOMALY: number;
-  TLE_LINE1: string;
-  TLE_LINE2: string;
+  TLE_LINE1?: string;
+  TLE_LINE2?: string;
+  // Extra OMM fields from CelesTrak GP JSON
+  EPHEMERIS_TYPE?: number;
+  CLASSIFICATION_TYPE?: string;
+  ELEMENT_SET_NO?: number;
+  REV_AT_EPOCH?: number;
+  BSTAR?: number;
+  MEAN_MOTION_DOT?: number;
+  MEAN_MOTION_DDOT?: number;
+  OBJECT_ID?: string;
 }
 
 export interface SatellitePosition {
@@ -40,10 +49,24 @@ const EARTH_RADIUS_KM = 6371;
 const SOLAR_CONSTANT = 1361; // W/m² at 1 AU
 const SOLAR_PANEL_EFFICIENCY = 0.29; // Triple-junction GaAs
 
-/** Compute satellite position at a given time from TLE */
+/** Cache parsed satrecs so we don't re-parse every 3s propagation cycle */
+const satrecCache = new Map<number, satellite.SatRec>();
+
+function getSatrec(tle: TLERecord): satellite.SatRec {
+  const cached = satrecCache.get(tle.NORAD_CAT_ID);
+  if (cached) return cached;
+  const satrec = tle.TLE_LINE1 && tle.TLE_LINE2
+    ? satellite.twoline2satrec(tle.TLE_LINE1, tle.TLE_LINE2)
+    : satellite.json2satrec(tle as unknown as satellite.OMMJsonObject);
+  satrecCache.set(tle.NORAD_CAT_ID, satrec);
+  return satrec;
+}
+
+/** Compute satellite position at a given time from TLE or OMM JSON */
 export function computePosition(tle: TLERecord, date: Date = new Date()): SatellitePosition | null {
   try {
-    const satrec = satellite.twoline2satrec(tle.TLE_LINE1, tle.TLE_LINE2);
+    const satrec = getSatrec(tle);
+
     const positionAndVelocity = satellite.propagate(satrec, date);
     if (!positionAndVelocity.position || typeof positionAndVelocity.position === 'boolean') return null;
 

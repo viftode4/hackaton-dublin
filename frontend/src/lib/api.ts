@@ -23,26 +23,27 @@ export async function advisorChat(
   message: string,
   history: { role: string; content: string }[] = [],
   customerId?: string,
+  locationContext?: Record<string, unknown>,
 ): Promise<ChatResponse> {
   return request('/api/advisor/chat', {
     method: 'POST',
-    body: JSON.stringify({ message, history, customer_id: customerId }),
+    body: JSON.stringify({ message, history, customer_id: customerId, location_context: locationContext }),
   });
 }
 
 // --- Reports ---
 
-export async function generateScorecard(locationId: string, customerId?: string) {
+export async function generateScorecard(locationId: string, customerId?: string, locationData?: Record<string, unknown>) {
   return request<Record<string, unknown>>('/api/reports/scorecard', {
     method: 'POST',
-    body: JSON.stringify({ location_id: locationId, customer_id: customerId }),
+    body: JSON.stringify({ location_id: locationId, customer_id: customerId, location_data: locationData }),
   });
 }
 
-export async function generateBlueprint(locationId: string, customerId?: string) {
+export async function generateBlueprint(locationId: string, customerId?: string, locationData?: Record<string, unknown>) {
   return request<Record<string, unknown>>('/api/reports/blueprint', {
     method: 'POST',
-    body: JSON.stringify({ location_id: locationId, customer_id: customerId }),
+    body: JSON.stringify({ location_id: locationId, customer_id: customerId, location_data: locationData }),
   });
 }
 
@@ -127,10 +128,11 @@ export async function createInventory(data: { inventory: Omit<BackendInventory, 
 }
 
 export async function deleteInventory(id: number): Promise<void> {
-  await fetch(`${API_BASE}/api/inventories/${id}`, {
+  const res = await fetch(`${API_BASE}/api/inventories/${id}`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
   });
+  if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
 }
 
 export async function updateInventory(id: number, data: Record<string, unknown>): Promise<BackendInventory> {
@@ -138,6 +140,36 @@ export async function updateInventory(id: number, data: Record<string, unknown>)
     method: 'PATCH',
     body: JSON.stringify({ inventory: data }),
   });
+}
+
+// --- Blueprints ---
+
+export interface BlueprintSummary {
+  id: number;
+  location_id: string;
+  location_name: string;
+  paid_at: string;
+  has_content: boolean;
+  solana_tx_hash: string | null;
+}
+
+export interface BlueprintDetail {
+  id: number;
+  location_id: string;
+  location_name: string;
+  paid_at: string;
+  solana_tx_hash: string | null;
+  content: Record<string, unknown> | null;
+}
+
+export async function listBlueprints(customerId?: string): Promise<BlueprintSummary[]> {
+  const cid = customerId || 'anonymous';
+  return request<BlueprintSummary[]>(`/api/payments/blueprints?customer_id=${encodeURIComponent(cid)}`);
+}
+
+export async function getBlueprint(id: number, customerId?: string): Promise<BlueprintDetail> {
+  const cid = customerId || 'anonymous';
+  return request<BlueprintDetail>(`/api/payments/blueprint/${id}?customer_id=${encodeURIComponent(cid)}`);
 }
 
 // --- Solana Mint ---

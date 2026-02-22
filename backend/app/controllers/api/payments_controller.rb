@@ -51,6 +51,7 @@ module Api
           customer_id: customer_id,
           stripe_session_id: session.id,
           customer_email: params[:email],
+          location_name: params[:location_name],
           amount_cents: blueprint_price_cents,
           currency: 'usd',
           status: 'pending'
@@ -62,8 +63,8 @@ module Api
           amount_cents: blueprint_price_cents,
           currency: 'usd'
         }
-      rescue Stripe::Error => e
-        Rails.logger.error("Stripe error: #{e.message}")
+      rescue StandardError => e
+        Rails.logger.error("Stripe checkout error: #{e.message}")
         render json: {
           error: "Payment processing failed: #{e.message}"
         }, status: :unprocessable_entity
@@ -71,31 +72,94 @@ module Api
     end
 
     # GET /api/payments/session/:session_id
-    # Check payment status
+    # Check payment status — also falls back to local DB if Stripe API fails
     def session_status
+      # First try local DB (fast, no external call)
+      payment = BlueprintPayment.find_by(stripe_session_id: params[:session_id])
+      if payment&.paid?
+        return render json: {
+          status: 'paid',
+          paid: true,
+          location_id: payment.location_id,
+          customer_email: payment.customer_email,
+          amount_total: payment.amount_cents,
+          currency: payment.currency
+        }
+      end
+
+      # Fall back to Stripe API for real-time status
       begin
         session = Stripe::Checkout::Session.retrieve(params[:session_id])
+
+        location_id = begin
+          session.metadata['location_id']
+        rescue
+          nil
+        end
+
+        paid = session.payment_status == 'paid'
+
+        # Update local record if paid
+        if paid && payment
+          payment.update(status: 'paid', paid_at: Time.current)
+        end
 
         render json: {
           status: session.payment_status,
           customer_email: session.customer_email,
           amount_total: session.amount_total,
-          amount_subtotal: session.amount_subtotal,
           currency: session.currency,
-          location_id: session.metadata&.dig('location_id'),
-          paid: session.payment_status == 'paid'
+          location_id: location_id,
+          paid: paid
         }
-      rescue Stripe::InvalidRequestError => e
-        Rails.logger.error("Stripe session not found: #{e.message}")
+      rescue StandardError => e
+        Rails.logger.error("Stripe session lookup error: #{e.message}")
+        # If Stripe API fails, return what we know from DB
         render json: {
-          error: "Session not found: #{params[:session_id]}"
-        }, status: :not_found
-      rescue Stripe::Error => e
-        Rails.logger.error("Stripe error: #{e.message}")
-        render json: {
-          error: "Payment lookup failed: #{e.message}"
-        }, status: :unprocessable_entity
+          status: payment&.status || 'unknown',
+          paid: payment&.paid? || false,
+          location_id: payment&.location_id,
+          error: nil
+        }
       end
+    end
+
+    # GET /api/payments/blueprints
+    # List all purchased blueprints for a customer
+    def blueprints
+      payments = BlueprintPayment.paid.for_customer(customer_id).order(paid_at: :desc)
+
+      render json: payments.map { |p|
+        {
+          id: p.id,
+          location_id: p.location_id,
+          location_name: p.location_name,
+          paid_at: p.paid_at,
+          has_content: p.blueprint_content.present?,
+          solana_tx_hash: p.solana_tx_hash
+        }
+      }
+    end
+
+    # GET /api/payments/blueprint/:id
+    # Get a specific blueprint's content
+    def blueprint
+      payment = BlueprintPayment.paid.for_customer(customer_id).find_by(id: params[:id])
+
+      unless payment
+        return render json: { error: 'Blueprint not found' }, status: :not_found
+      end
+
+      content = payment.blueprint_content.present? ? JSON.parse(payment.blueprint_content) : nil
+
+      render json: {
+        id: payment.id,
+        location_id: payment.location_id,
+        location_name: payment.location_name,
+        paid_at: payment.paid_at,
+        solana_tx_hash: payment.solana_tx_hash,
+        content: content
+      }
     end
 
     # GET /api/payments/check?location_id=X&customer_id=Y

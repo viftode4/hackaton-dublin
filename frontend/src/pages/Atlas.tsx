@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { PanelRightClose, PanelRightOpen, Bot, MapPin as MapPinIcon, ArrowUpDown } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen, Bot, MapPin as MapPinIcon, ArrowUpDown, Satellite } from 'lucide-react';
 import { GROUND_REGIONS, INITIAL_SATELLITES, type GroundRegion, type SatelliteData } from '@/lib/constants';
 import { fetchTLEGroup, computeOrbitalMetrics, type TLERecord } from '@/lib/tle-service';
 import { propagateAll, BAND_LABELS, type SatelliteCategory } from '@/lib/satellite-store';
@@ -21,7 +21,7 @@ import { type ScenarioId } from '@/lib/regression-model';
 import { type CelestialBody, type ExtraterrestrialLocation } from '@/lib/celestial';
 import type { CO2Estimate } from '@/lib/co2-api';
 import { estimateCO2 } from '@/lib/co2-api';
-import { getLocations, getInventories, createInventory, deleteInventory, mintToSolana, type BackendLocation } from '@/lib/api';
+import { getLocations, getInventories, createInventory, deleteInventory, mintToSolana, listBlueprints, type BackendLocation } from '@/lib/api';
 import { loadPowerPlantLOD, loadDataCenters, type PowerPlantLOD, type DataCenter } from '@/lib/geo-data';
 import { useAuth } from '@/lib/auth';
 
@@ -85,9 +85,10 @@ export default function Atlas() {
   const [scorecardTarget, setScorecardTarget] = useState<{
     id: string; name: string; body: string; carbon: number;
     locationData?: Record<string, unknown>;
+    initialViewMode?: 'scorecard' | 'blueprint';
   } | null>(null);
   const [mintingId, setMintingId] = useState<string | null>(null);
-  const [sidebarMode, setSidebarMode] = useState<'explore' | 'rankings' | 'chat'>('explore');
+  const [sidebarMode, setSidebarMode] = useState<'explore' | 'rankings' | 'chat' | 'satellites'>('explore');
   const [dataLayers, setDataLayers] = useState<DataLayers>({ heatmap: true, powerPlants: false, datacenters: false });
   const [selectedLocation, setSelectedLocation] = useState<LocationDetail | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<{
@@ -133,6 +134,57 @@ export default function Atlas() {
         // Now fetch persisted inventories and enrich with location data
         try {
           const backendInv = await getInventories();
+          const inventoryLocationIds = new Set(backendInv.map(bi => bi.location_id));
+
+          // Sync: create inventory + mint for any paid blueprints
+          const blueprintLocationIds = new Set<string>();
+          try {
+            const blueprints = await listBlueprints(customerId);
+            for (const bp of blueprints) blueprintLocationIds.add(bp.location_id);
+            for (const bp of blueprints) {
+              const existing = backendInv.find(bi => bi.location_id === bp.location_id);
+              if (!existing) {
+                // Missing from inventory — create + mint
+                try {
+                  const loc = locMap.get(bp.location_id);
+                  const created = await createInventory({
+                    inventory: {
+                      location_id: bp.location_id,
+                      name: bp.location_name || loc?.name || bp.location_id,
+                      capacity_mw: Math.round(10 + Math.random() * 90),
+                      utilization_pct: Math.round(40 + Math.random() * 55),
+                      carbon_footprint_tons: loc?.carbon_intensity_gco2 ?? 0,
+                      power_source: loc?.energy_sources[0] ?? null,
+                      monthly_cost: Math.round(100000 + Math.random() * 900000),
+                      workload_types: ['General'],
+                    },
+                  });
+                  backendInv.push(created);
+                  try {
+                    await mintToSolana(bp.location_id, created.id, customerId);
+                    const updated = await getInventories();
+                    const match = updated.find(i => i.id === created.id);
+                    if (match) {
+                      const idx = backendInv.findIndex(i => i.id === created.id);
+                      if (idx >= 0) backendInv[idx] = match;
+                    }
+                  } catch {}
+                } catch {}
+              } else if (!existing.solana_tx_hash) {
+                // In inventory but not minted — mint now
+                try {
+                  await mintToSolana(bp.location_id, existing.id, customerId);
+                  const updated = await getInventories();
+                  const match = updated.find(i => i.id === existing.id);
+                  if (match) {
+                    const idx = backendInv.findIndex(i => i.id === existing.id);
+                    if (idx >= 0) backendInv[idx] = match;
+                  }
+                } catch {}
+              }
+            }
+          } catch {}
+
           const enriched: InventoryItem[] = backendInv.map(bi => {
             const loc = locMap.get(bi.location_id);
             const parts = (loc?.name ?? bi.name).split(',').map(s => s.trim());
@@ -149,6 +201,7 @@ export default function Atlas() {
               carbonFootprint: bi.carbon_footprint_tons,
               monthlyCost: bi.monthly_cost,
               solanaTxHash: bi.solana_tx_hash ?? undefined,
+              hasBlueprint: blueprintLocationIds.has(bi.location_id),
             };
           });
           if (enriched.length > 0) setInventory(enriched);
@@ -285,8 +338,11 @@ export default function Atlas() {
     }
   };
 
-  const handleAddToInventory = async (locationId: string, locationName: string, body: string, carbon: number) => {
-    if (inventory.some(i => i.id === locationId)) return; // already added
+  const handleAddToInventory = async (locationId: string, locationName: string, body: string, carbon: number): Promise<number | undefined> => {
+    if (inventory.some(i => i.id === locationId)) {
+      // Already in inventory — return existing backend ID
+      return inventory.find(i => i.id === locationId)?.backendId;
+    }
     const region = regions.find(r => r.id === locationId);
     const sat = satellites.find(s => s.id === locationId);
     const lat = region?.lat ?? sat?.lat ?? 0;
@@ -316,10 +372,10 @@ export default function Atlas() {
         solanaTxHash: created.solana_tx_hash ?? undefined,
       };
       setInventory(prev => [...prev, newItem]);
-      setScorecardTarget(null);
-      setActiveTab('inventory');
+      return created.id;
     } catch (err) {
       console.error('Failed to persist inventory item:', err);
+      return undefined;
     }
   };
 
@@ -343,6 +399,17 @@ export default function Atlas() {
     else if (item.body === 'moon') setCelestialBody('moon');
     else if (item.body === 'mars') setCelestialBody('mars');
     setZoomTarget({ lat: item.lat, lng: item.lng });
+  };
+
+  const handleViewBlueprint = (item: InventoryItem) => {
+    setScorecardTarget({
+      id: item.id,
+      name: item.name,
+      body: item.body,
+      carbon: item.carbonFootprint,
+      initialViewMode: 'blueprint',
+    });
+    setSidebarOpen(true);
   };
 
   const handleMintToSolana = async (item: InventoryItem) => {
@@ -534,131 +601,40 @@ export default function Atlas() {
           carbonIntensity={scorecardTarget.carbon}
           customerId={customerId}
           locationData={scorecardTarget.locationData}
+          initialViewMode={scorecardTarget.initialViewMode}
           onClose={() => setScorecardTarget(null)}
-          onAddToInventory={handleAddToInventory}
+          onInventoryChanged={() => {
+            Promise.all([getInventories(), listBlueprints(customerId)]).then(([backendInv, bps]) => {
+              const bpIds = new Set(bps.map(bp => bp.location_id));
+              const enriched: InventoryItem[] = backendInv.map(bi => {
+                const loc = locationsRef.current.get(bi.location_id);
+                const parts = (loc?.name ?? bi.name).split(',').map(s => s.trim());
+                return {
+                  id: bi.location_id,
+                  backendId: bi.id,
+                  name: bi.name,
+                  location: loc ? (parts[1] ?? loc.name) : 'Unknown',
+                  body: loc?.body ?? 'earth',
+                  lat: loc?.coordinates.lat ?? 0,
+                  lng: loc?.coordinates.lng ?? 0,
+                  capacityMW: bi.capacity_mw,
+                  utilization: bi.utilization_pct,
+                  carbonFootprint: bi.carbon_footprint_tons,
+                  monthlyCost: bi.monthly_cost,
+                  solanaTxHash: bi.solana_tx_hash ?? undefined,
+                  hasBlueprint: bpIds.has(bi.location_id),
+                };
+              });
+              setInventory(enriched);
+            }).catch(() => {});
+          }}
         />
       );
     }
 
     switch (activeTab) {
-      case 'map':
-        return (
-          <div className="flex flex-col h-full">
-            {selectedCountry?.co2 && (
-              <div className="p-3 border-b border-border">
-                <CountryCard
-                  name={selectedCountry.name}
-                  co2={selectedCountry.co2}
-                  onAddToCompare={() => {
-                    const id = `candidate-${selectedCountry.name}`;
-                    setCandidateCountries((prev) => {
-                      if (prev.some(c => c.id === id)) return prev;
-                      return [...prev, {
-                        id,
-                        name: selectedCountry.name,
-                        body: 'earth',
-                        region: 'earth' as const,
-                        carbon: selectedCountry.co2!.co2_intensity_gco2,
-                        location: selectedCountry.name,
-                        energyMix: selectedCountry.co2!.energy_mix,
-                      }];
-                    });
-                    if (!compareSelected.includes(id)) {
-                      setCompareSelected((prev) => [...prev, id]);
-                    }
-                    setSelectedCountry(null);
-                    setActiveTab('compare');
-                  }}
-                  onGenerateReport={() => {
-                    const countryId = `candidate-${selectedCountry.name}`;
-                    setScorecardTarget({
-                      id: countryId,
-                      name: selectedCountry.name,
-                      body: 'earth',
-                      carbon: selectedCountry.co2!.co2_intensity_gco2,
-                      locationData: {
-                        id: countryId,
-                        name: selectedCountry.name,
-                        body: 'earth',
-                        carbon_intensity_gco2: selectedCountry.co2!.co2_intensity_gco2,
-                        coordinates: { lat: 0, lng: 0 },
-                        energy_cost_kwh: 0,
-                        energy_sources: [],
-                        avg_temperature_c: 20,
-                        cooling_method: 'standard',
-                        special_factors: [`Country: ${selectedCountry.name}`],
-                      },
-                    });
-                  }}
-                  onDismiss={() => setSelectedCountry(null)}
-                />
-              </div>
-            )}
-            {selectedLocation && !selectedCountry?.co2 && (
-              <div className="p-3 border-b border-border">
-                <LocationDetailCard
-                  location={selectedLocation}
-                  onDismiss={() => setSelectedLocation(null)}
-                  onGenerateReport={() => {
-                    setScorecardTarget({
-                      id: selectedLocation.id,
-                      name: selectedLocation.name,
-                      body: selectedLocation.body,
-                      carbon: selectedLocation.carbon,
-                      locationData: buildLocationData(selectedLocation),
-                    });
-                  }}
-                  onAddToCompare={() => {
-                    const id = selectedLocation.id;
-                    setCandidateCountries((prev) => {
-                      if (prev.some(c => c.id === id)) return prev;
-                      return [...prev, {
-                        id,
-                        name: selectedLocation.name,
-                        body: selectedLocation.body,
-                        region: selectedLocation.body,
-                        carbon: selectedLocation.carbon,
-                        location: selectedLocation.region?.location ?? selectedLocation.satellite?.status ?? selectedLocation.body,
-                        energyMix: selectedLocation.countryCO2?.energy_mix,
-                      }];
-                    });
-                    if (!compareSelected.includes(id)) {
-                      setCompareSelected((prev) => [...prev, id]);
-                    }
-                    setSelectedLocation(null);
-                    setActiveTab('compare');
-                  }}
-                  onAddToInventory={() => {
-                    handleAddToInventory(
-                      selectedLocation.id,
-                      selectedLocation.name,
-                      selectedLocation.body,
-                      selectedLocation.carbon,
-                    );
-                    setSelectedLocation(null);
-                  }}
-                />
-              </div>
-            )}
-            <div className="flex-1 overflow-y-auto">
-              {celestialBody === 'orbit' ? (
-                <OrbitSidebar
-                  satellites={satellites}
-                  search={satelliteSearch}
-                  onSearchChange={setSatelliteSearch}
-                  onSatelliteClick={(sat) => {
-                    setZoomTarget({ lat: sat.lat, lng: sat.lng });
-                    handleLocationClick(sat.id, sat.name, 'orbit', sat.carbonScore, undefined, sat);
-                  }}
-                />
-              ) : (
-                <Sidebar regions={regions} satellites={satellites} onRoutingComplete={setRoutingTarget} />
-              )}
-            </div>
-          </div>
-        );
       case 'inventory':
-        return <InventoryPanel items={inventory} onRemove={handleRemoveFromInventory} onItemClick={handleInventoryClick} onMint={handleMintToSolana} mintingId={mintingId} />;
+        return <InventoryPanel items={inventory} onRemove={handleRemoveFromInventory} onItemClick={handleInventoryClick} onViewBlueprint={handleViewBlueprint} onMint={handleMintToSolana} mintingId={mintingId} />;
       case 'compare':
         return <ComparePanel selected={compareSelected} onSelectedChange={setCompareSelected} locations={compareLocations} projectionYear={projectionYear} scenario={scenario} />;
       case 'add':
@@ -798,6 +774,7 @@ export default function Atlas() {
               <div className="flex border-b border-border shrink-0">
                 {([
                   { id: 'explore' as const, icon: <MapPinIcon className="w-3.5 h-3.5" />, label: 'Explore' },
+                  ...(celestialBody === 'orbit' ? [{ id: 'satellites' as const, icon: <Satellite className="w-3.5 h-3.5" />, label: 'Satellites' }] : []),
                   { id: 'rankings' as const, icon: <ArrowUpDown className="w-3.5 h-3.5" />, label: 'Rankings' },
                   { id: 'chat' as const, icon: <Bot className="w-3.5 h-3.5" />, label: 'AI Advisor' },
                 ]).map(tab => (
@@ -817,17 +794,157 @@ export default function Atlas() {
               </div>
             )}
 
+            {/* Location/Country cards — visible across all map sub-tabs */}
+            {activeTab === 'map' && !scorecardTarget && selectedCountry?.co2 && (
+              <div className="p-3 border-b border-border shrink-0">
+                <CountryCard
+                  name={selectedCountry.name}
+                  co2={selectedCountry.co2}
+                  onAddToCompare={() => {
+                    const id = `candidate-${selectedCountry.name}`;
+                    setCandidateCountries((prev) => {
+                      if (prev.some(c => c.id === id)) return prev;
+                      return [...prev, {
+                        id,
+                        name: selectedCountry.name,
+                        body: 'earth',
+                        region: 'earth' as const,
+                        carbon: selectedCountry.co2!.co2_intensity_gco2,
+                        location: selectedCountry.name,
+                        energyMix: selectedCountry.co2!.energy_mix,
+                        trendPct: selectedCountry.co2!.country_trend_pct,
+                      }];
+                    });
+                    if (!compareSelected.includes(id)) {
+                      setCompareSelected((prev) => [...prev, id]);
+                    }
+                    setSelectedCountry(null);
+                    setActiveTab('compare');
+                  }}
+                  onGenerateReport={() => {
+                    const countryId = `candidate-${selectedCountry.name}`;
+                    setScorecardTarget({
+                      id: countryId,
+                      name: selectedCountry.name,
+                      body: 'earth',
+                      carbon: selectedCountry.co2!.co2_intensity_gco2,
+                      locationData: {
+                        id: countryId,
+                        name: selectedCountry.name,
+                        body: 'earth',
+                        carbon_intensity_gco2: selectedCountry.co2!.co2_intensity_gco2,
+                        coordinates: { lat: 0, lng: 0 },
+                        energy_cost_kwh: 0,
+                        energy_sources: [],
+                        avg_temperature_c: 20,
+                        cooling_method: 'standard',
+                        special_factors: [`Country: ${selectedCountry.name}`],
+                      },
+                    });
+                  }}
+                  onDismiss={() => setSelectedCountry(null)}
+                />
+              </div>
+            )}
+            {activeTab === 'map' && !scorecardTarget && selectedLocation && !selectedCountry?.co2 && (
+              <div className="p-3 border-b border-border shrink-0">
+                <LocationDetailCard
+                  location={selectedLocation}
+                  onDismiss={() => setSelectedLocation(null)}
+                  onGenerateReport={() => {
+                    setScorecardTarget({
+                      id: selectedLocation.id,
+                      name: selectedLocation.name,
+                      body: selectedLocation.body,
+                      carbon: selectedLocation.carbon,
+                      locationData: buildLocationData(selectedLocation),
+                    });
+                  }}
+                  onAddToCompare={() => {
+                    const id = selectedLocation.id;
+                    setCandidateCountries((prev) => {
+                      if (prev.some(c => c.id === id)) return prev;
+                      return [...prev, {
+                        id,
+                        name: selectedLocation.name,
+                        body: selectedLocation.body,
+                        region: selectedLocation.body,
+                        carbon: selectedLocation.carbon,
+                        location: selectedLocation.region?.location ?? selectedLocation.satellite?.status ?? selectedLocation.body,
+                        energyMix: selectedLocation.countryCO2?.energy_mix,
+                        trendPct: selectedLocation.countryCO2?.country_trend_pct,
+                      }];
+                    });
+                    if (!compareSelected.includes(id)) {
+                      setCompareSelected((prev) => [...prev, id]);
+                    }
+                    setSelectedLocation(null);
+                    setActiveTab('compare');
+                  }}
+                  onAddToInventory={() => {
+                    handleAddToInventory(
+                      selectedLocation.id,
+                      selectedLocation.name,
+                      selectedLocation.body,
+                      selectedLocation.carbon,
+                    );
+                    setSelectedLocation(null);
+                  }}
+                />
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto">
-              {activeTab === 'map' && sidebarMode === 'chat' && !scorecardTarget ? (
-                <ChatPanel
-                  onClose={() => setSidebarMode('explore')}
-                  locationContext={selectedLocation ? buildLocationData(selectedLocation) : undefined}
-                />
-              ) : activeTab === 'map' && sidebarMode === 'rankings' && !scorecardTarget ? (
-                <RankingsPanel
-                  projectionYear={projectionYear}
-                  scenario={scenario}
-                />
+              {activeTab === 'map' && !scorecardTarget ? (
+                sidebarMode === 'chat' ? (
+                  <ChatPanel
+                    onClose={() => setSidebarMode('explore')}
+                    locationContext={selectedLocation ? buildLocationData(selectedLocation) : undefined}
+                    onInventoryChanged={() => {
+                      // Refresh inventory from backend after AI-driven payment
+                      Promise.all([getInventories(), listBlueprints(customerId)]).then(([backendInv, bps]) => {
+                        const bpIds = new Set(bps.map(bp => bp.location_id));
+                        const enriched = backendInv.map(bi => {
+                          const loc = locationsRef.current.get(bi.location_id);
+                          const parts = (loc?.name ?? bi.name).split(',').map(s => s.trim());
+                          return {
+                            id: bi.location_id,
+                            backendId: bi.id,
+                            name: bi.name,
+                            location: loc ? (parts[1] ?? loc.name) : 'Unknown',
+                            body: loc?.body ?? 'earth',
+                            lat: loc?.coordinates.lat ?? 0,
+                            lng: loc?.coordinates.lng ?? 0,
+                            capacityMW: bi.capacity_mw,
+                            utilization: bi.utilization_pct,
+                            carbonFootprint: bi.carbon_footprint_tons,
+                            monthlyCost: bi.monthly_cost,
+                            solanaTxHash: bi.solana_tx_hash ?? undefined,
+                            hasBlueprint: bpIds.has(bi.location_id),
+                          };
+                        });
+                        setInventory(enriched);
+                      }).catch(() => {});
+                    }}
+                  />
+                ) : sidebarMode === 'rankings' ? (
+                  <RankingsPanel
+                    projectionYear={projectionYear}
+                    scenario={scenario}
+                  />
+                ) : sidebarMode === 'satellites' ? (
+                  <OrbitSidebar
+                    satellites={satellites}
+                    search={satelliteSearch}
+                    onSearchChange={setSatelliteSearch}
+                    onSatelliteClick={(sat) => {
+                      setZoomTarget({ lat: sat.lat, lng: sat.lng });
+                      handleLocationClick(sat.id, sat.name, 'orbit', sat.carbonScore, undefined, sat);
+                    }}
+                  />
+                ) : (
+                  <Sidebar regions={regions} satellites={satellites} onRoutingComplete={setRoutingTarget} />
+                )
               ) : (
                 renderSidePanel()
               )}

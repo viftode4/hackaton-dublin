@@ -60,6 +60,7 @@ module Api
         customer_id: customer_id,
         stripe_payment_intent_id: session['payment_intent'],
         customer_email: session['customer_email'] || session.dig('customer_details', 'email'),
+        location_name: session.dig('metadata', 'location_name') || payment.location_name,
         amount_cents: session['amount_total'] || 29900,
         currency: session['currency'] || 'usd',
         status: 'paid',

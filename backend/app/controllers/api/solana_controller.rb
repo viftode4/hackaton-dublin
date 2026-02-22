@@ -17,13 +17,10 @@ module Api
       end
 
       inventory = Inventory.find(params[:inventory_id])
-      location = LocationService.find(params[:location_id])
-
-      unless inventory && location
-        return render json: {
-          error: 'Inventory or location not found'
-        }, status: :not_found
-      end
+      location = LocationService.find(params[:location_id]) || {
+        id: params[:location_id],
+        name: inventory.name
+      }
 
       result = mint_on_solana(location, inventory)
 

@@ -15,7 +15,7 @@ services:
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-20250514}
       - SOLANA_SERVICE_URL=http://host.docker.internal:3001
-      - SOLANA_MOCK=${SOLANA_MOCK:-}
+      - SOLANA_MOCK=
       - PAID_API_KEY=${PAID_API_KEY:-}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}

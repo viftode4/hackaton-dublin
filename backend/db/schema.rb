@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_02_22_000001) do
+ActiveRecord::Schema[7.1].define(version: 2026_02_22_000002) do
   create_table "blueprint_payments", force: :cascade do |t|
     t.string "location_id", null: false
     t.string "customer_id", null: false
@@ -23,6 +23,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_02_22_000001) do
     t.datetime "paid_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "location_name"
+    t.text "blueprint_content"
+    t.string "solana_tx_hash"
     t.index ["customer_id", "location_id"], name: "index_blueprint_payments_on_customer_id_and_location_id"
     t.index ["customer_id"], name: "index_blueprint_payments_on_customer_id"
     t.index ["location_id"], name: "index_blueprint_payments_on_location_id"
