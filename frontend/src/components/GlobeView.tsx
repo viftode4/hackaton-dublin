@@ -88,6 +88,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   const [clickedPin, setClickedPin] = useState<{ lat: number; lng: number; name: string; co2: number } | null>(null);
   const [camera, setCamera] = useState({ lat: 30, lng: 0, altitude: 2.5 });
   const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastZoomUpdateRef = useRef(0);
   const [moonFeatures, setMoonFeatures] = useState<MoonFeature[]>([]);
   const [marsFeatures, setMarsFeatures] = useState<MarsFeature[]>([]);
   const [marsGeology, setMarsGeology] = useState<any[]>([]);
@@ -175,7 +176,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     return [];
   }, [celestialBody, moonLocations, marsLocations]);
 
-  // Points: user's own DCs + viewport-culled power-plant clusters + viewport-culled global DCs (all WebGL)
+  // Points: user's own DCs + viewport-culled global DCs (WebGL)
   const pointsData = useMemo(() => {
     if (celestialBody !== 'earth') return [];
     const pts: any[] = regions.map(r => ({
@@ -185,25 +186,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       regionId: r.id,
     }));
 
-    // Power plant clusters — LOD + viewport culled
-    if (dataLayers?.powerPlants && powerPlantLOD) {
-      const visible = getVisibleClusters(powerPlantLOD, camera.lat, camera.lng, camera.altitude);
-      for (const c of visible) {
-        const sorted = Object.entries(c.fuelBreakdown).sort((a, b) => b[1] - a[1]).slice(0, 3);
-        const breakdown = sorted.map(([f, mw]) => `${f}: ${Math.round(mw).toLocaleString()} MW`).join('<br/>');
-        pts.push({
-          lat: c.lat, lng: c.lng, alt: 0.006,
-          color: getFuelColor(c.dominantFuel),
-          radius: Math.max(0.15, Math.min(0.7, c.totalCapacityMW / 50000)),
-          label: `<b>${c.count} Power Plant${c.count > 1 ? 's' : ''}</b><br/>` +
-            `${Math.round(c.totalCapacityMW).toLocaleString()} MW<br/>` +
-            `${Math.round(c.totalEmissions).toLocaleString()} tCO₂e<br/>` +
-            `<hr style="border-color:rgba(255,255,255,0.2);margin:3px 0"/>${breakdown}`,
-        });
-      }
-    }
-
-    // Global datacenters — viewport culled, WebGL points (not HTML DOM)
+    // Global datacenters — viewport culled, WebGL points
     if (dataLayers?.datacenters && globalDatacenters) {
       const visible = viewportCull(globalDatacenters, camera.lat, camera.lng, camera.altitude);
       for (const dc of visible) {
@@ -217,7 +200,19 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     }
 
     return pts;
-  }, [regions, celestialBody, dataLayers, powerPlantLOD, globalDatacenters, camera]);
+  }, [regions, celestialBody, dataLayers, globalDatacenters, camera]);
+
+  // Hex bin: power plant clusters rendered as nice hexagonal columns
+  const hexBinData = useMemo(() => {
+    if (celestialBody !== 'earth' || !dataLayers?.powerPlants || !powerPlantLOD) return [];
+    return getVisibleClusters(powerPlantLOD, camera.lat, camera.lng, camera.altitude);
+  }, [celestialBody, dataLayers, powerPlantLOD, camera]);
+
+  const hexBinResolution = camera.altitude > 2.5 ? 1
+    : camera.altitude > 1.5 ? 2
+    : camera.altitude > 0.8 ? 3
+    : camera.altitude > 0.4 ? 4
+    : 5;
 
   const labelsData = useMemo(() => {
     if (celestialBody === 'earth') {
@@ -312,6 +307,32 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     });
   }, [onCountryClick]);
 
+  // Globe surface click — works on all bodies (moon/mars have no polygons to click)
+  const handleGlobeClick = useCallback(({ lat, lng }: { lat: number; lng: number }) => {
+    const c = globeRef.current?.controls();
+    if (c) c.autoRotate = false;
+
+    const body = celestialBody;
+    const label = `${lat.toFixed(2)}°, ${lng.toFixed(2)}°`;
+
+    if (body === 'earth') {
+      // On Earth, polygon click handles countries — globe click is fallback for ocean areas
+      setClickedPin({ lat, lng, name: label, co2: 0 });
+      onLocationClick?.(
+        `custom-${lat.toFixed(2)}-${lng.toFixed(2)}`, label, 'earth', 0
+      );
+    } else if (body === 'moon' || body === 'mars') {
+      setClickedPin({ lat, lng, name: `${body === 'moon' ? 'Lunar' : 'Martian'} Site (${label})`, co2: 0 });
+      onLocationClick?.(
+        `custom-${body}-${lat.toFixed(2)}-${lng.toFixed(2)}`,
+        `${body === 'moon' ? 'Lunar' : 'Martian'} Site (${label})`,
+        body, 0
+      );
+    }
+
+    globeRef.current?.pointOfView({ lat, lng, altitude: 1.2 }, 1000);
+  }, [celestialBody, onLocationClick]);
+
   // HTML elements: user's datacenter pins on Earth, satellite markers on orbit, plus clicked pin
   const htmlElementsData = useMemo(() => {
     if (celestialBody === 'earth') {
@@ -374,12 +395,23 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
 
   const showHeatmap = dataLayers?.heatmap ?? true;
 
-  // Zoom handler — debounced camera update for LOD + viewport culling
+  // Camera tracking via onZoom prop — leading + trailing throttle
+  // Clamp altitude to MIN_ALT so LOD/hex resolution freezes below that threshold
+  const MIN_ALT = 1.5;
   const handleZoom = useCallback((pov: { lat: number; lng: number; altitude: number }) => {
+    const now = Date.now();
+    const clamped = { lat: pov.lat, lng: pov.lng, altitude: Math.max(pov.altitude, MIN_ALT) };
+    // Leading: immediate update if 800ms since last
+    if (now - lastZoomUpdateRef.current > 800) {
+      lastZoomUpdateRef.current = now;
+      setCamera(clamped);
+    }
+    // Trailing: final update after interaction stops
     if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
     zoomTimerRef.current = setTimeout(() => {
-      setCamera({ lat: pov.lat, lng: pov.lng, altitude: pov.altitude });
-    }, 150);
+      lastZoomUpdateRef.current = Date.now();
+      setCamera(clamped);
+    }, 400);
   }, []);
 
   return (
@@ -394,10 +426,61 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
           atmosphereColor={config.atmosphereColor}
           atmosphereAltitude={config.atmosphereAltitude}
           showAtmosphere={config.showAtmosphere}
+          onGlobeClick={handleGlobeClick}
           onZoom={handleZoom}
           pointsData={pointsData}
           pointLat="lat" pointLng="lng" pointAltitude="alt"
           pointColor="color" pointRadius="radius" pointLabel="label"
+          hexBinPointsData={hexBinData}
+          hexBinPointLat={(d: any) => d.lat}
+          hexBinPointLng={(d: any) => d.lng}
+          hexBinPointWeight={(d: any) => d.totalCapacityMW || 1}
+          hexBinResolution={hexBinResolution}
+          hexTopColor={(d: any) => {
+            const pts = d.points as any[];
+            const fuelCap: Record<string, number> = {};
+            for (const p of pts) {
+              for (const [fuel, mw] of Object.entries(p.fuelBreakdown || {})) {
+                fuelCap[fuel] = (fuelCap[fuel] || 0) + (mw as number);
+              }
+            }
+            let dominant = 'other', max = 0;
+            for (const [f, c] of Object.entries(fuelCap)) { if (c > max) { max = c; dominant = f; } }
+            return getFuelColor(dominant) + 'cc';
+          }}
+          hexSideColor={(d: any) => {
+            const pts = d.points as any[];
+            const fuelCap: Record<string, number> = {};
+            for (const p of pts) {
+              for (const [fuel, mw] of Object.entries(p.fuelBreakdown || {})) {
+                fuelCap[fuel] = (fuelCap[fuel] || 0) + (mw as number);
+              }
+            }
+            let dominant = 'other', max = 0;
+            for (const [f, c] of Object.entries(fuelCap)) { if (c > max) { max = c; dominant = f; } }
+            return getFuelColor(dominant) + '88';
+          }}
+          hexAltitude={(d: any) => Math.max(0.01, Math.min(0.5, d.sumWeight / 200000))}
+          hexLabel={(d: any) => {
+            const pts = d.points as any[];
+            const totalPlants = pts.reduce((s: number, p: any) => s + (p.count || 1), 0);
+            const totalMW = Math.round(d.sumWeight);
+            const totalEmissions = Math.round(pts.reduce((s: number, p: any) => s + (p.totalEmissions || 0), 0));
+            const fuelCap: Record<string, number> = {};
+            for (const p of pts) {
+              for (const [fuel, mw] of Object.entries(p.fuelBreakdown || {})) {
+                fuelCap[fuel] = (fuelCap[fuel] || 0) + (mw as number);
+              }
+            }
+            const sorted = Object.entries(fuelCap).sort((a, b) => b[1] - a[1]).slice(0, 4);
+            const breakdown = sorted.map(([f, mw]) => `${f}: ${Math.round(mw).toLocaleString()} MW`).join('<br/>');
+            return `<b>${totalPlants.toLocaleString()} Power Plant${totalPlants > 1 ? 's' : ''}</b><br/>` +
+              `${totalMW.toLocaleString()} MW total<br/>` +
+              `${totalEmissions.toLocaleString()} tCO₂e<br/>` +
+              `<hr style="border-color:rgba(255,255,255,0.2);margin:3px 0"/>${breakdown}`;
+          }}
+          hexMargin={0.2}
+          hexTransitionDuration={0}
           ringsData={ringsData}
           ringLat="lat" ringLng="lng"
           ringColor="color" ringMaxRadius="maxR"
@@ -462,6 +545,38 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       {celestialBody === 'earth' && dataLayers && onDataLayersChange && (
         <div className="absolute bottom-14 right-4 z-20 bg-card/80 backdrop-blur-sm border border-border rounded-lg px-3 py-2 space-y-1.5 max-w-[200px]">
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Layers</p>
+          <p className="text-[8px] text-muted-foreground/60 font-mono">alt:{camera.altitude.toFixed(1)} hex:{hexBinResolution} pts:{hexBinData.length}</p>
+
+          {/* Fuel type legend — shown above checkboxes when power plants active */}
+          {dataLayers.powerPlants && (
+            <div className="pb-1.5 border-b border-border/50 space-y-0.5">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Fuel Type</p>
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                {FUEL_LEGEND.map(([fuel, color]) => (
+                  <div key={fuel} className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                    <span className="text-[9px] text-muted-foreground capitalize">{fuel}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Provider legend — shown above checkboxes when datacenters active */}
+          {dataLayers.datacenters && (
+            <div className="pb-1.5 border-b border-border/50 space-y-0.5">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Provider</p>
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                {PROVIDER_LEGEND.map(([provider, color]) => (
+                  <div key={provider} className="flex items-center gap-1">
+                    <div className="w-2 h-2 rotate-45" style={{ backgroundColor: color }} />
+                    <span className="text-[9px] text-muted-foreground uppercase">{provider}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -480,7 +595,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
             />
             <span className="text-xs text-foreground">
               Power Plants
-              {powerPlantLOD ? <span className="text-muted-foreground ml-1">(LOD)</span> : null}
+              {powerPlantLOD ? <span className="text-muted-foreground ml-1">({powerPlantLOD.totalCount.toLocaleString()})</span> : null}
             </span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
@@ -495,36 +610,6 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
               {globalDatacenters ? <span className="text-muted-foreground ml-1">({globalDatacenters.length})</span> : null}
             </span>
           </label>
-
-          {/* Fuel type legend when power plants layer is active */}
-          {dataLayers.powerPlants && (
-            <div className="pt-1.5 border-t border-border/50 space-y-0.5">
-              <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Fuel Type</p>
-              <div className="flex flex-wrap gap-x-2 gap-y-0.5">
-                {FUEL_LEGEND.map(([fuel, color]) => (
-                  <div key={fuel} className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-                    <span className="text-[9px] text-muted-foreground capitalize">{fuel}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Provider legend when datacenters layer is active */}
-          {dataLayers.datacenters && (
-            <div className="pt-1.5 border-t border-border/50 space-y-0.5">
-              <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Provider</p>
-              <div className="flex flex-wrap gap-x-2 gap-y-0.5">
-                {PROVIDER_LEGEND.map(([provider, color]) => (
-                  <div key={provider} className="flex items-center gap-1">
-                    <div className="w-2 h-2 rotate-45" style={{ backgroundColor: color }} />
-                    <span className="text-[9px] text-muted-foreground uppercase">{provider}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>

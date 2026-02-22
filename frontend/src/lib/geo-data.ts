@@ -26,14 +26,16 @@ export function viewportCull<T extends { lat: number; lng: number }>(
   camLat: number,
   camLng: number,
   altitude: number,
+  maxItems = 800,
 ): T[] {
   // Max angular radius (radians) that's visible from the camera.
-  // At alt 2.5 → ~π/2 (full hemisphere), at 0.3 → ~0.6 rad (~35°)
-  const maxAngle = Math.min(Math.PI / 2, 0.35 + altitude * 0.55);
+  // Tighter at close zoom: alt 2.5 → ~π/2, alt 0.3 → ~0.4 rad (~23°)
+  const maxAngle = Math.min(Math.PI / 2, 0.2 + altitude * 0.5);
   const result: T[] = [];
   for (const item of items) {
     if (angularDist(camLat, camLng, item.lat, item.lng) <= maxAngle) {
       result.push(item);
+      if (result.length >= maxItems) break;
     }
   }
   return result;
@@ -147,12 +149,18 @@ function clusterPlants(plants: PowerPlant[], cellDeg: number): PowerPlantCluster
 
 /** Multi-resolution pre-computed clusters. Computed once at load. */
 export interface PowerPlantLOD {
-  /** ~150 clusters — coarse continental view (altitude > 2.0) */
+  /** Total raw plant count for display */
+  totalCount: number;
+  /** ~150 clusters — zoomed way out (altitude > 2.5) */
   coarse: PowerPlantCluster[];
-  /** ~500 clusters — country level (altitude 1.0-2.0) */
+  /** ~400 clusters — continental (altitude 1.5–2.5) */
   medium: PowerPlantCluster[];
-  /** ~1500 clusters — regional level (altitude < 1.0) */
+  /** ~1200 clusters — country level (altitude 0.8–1.5) */
   fine: PowerPlantCluster[];
+  /** ~3000 clusters — regional (altitude 0.4–0.8) */
+  detail: PowerPlantCluster[];
+  /** ~6000+ clusters — close-up street level (altitude < 0.4) */
+  ultra: PowerPlantCluster[];
 }
 
 let lodCache: PowerPlantLOD | null = null;
@@ -175,9 +183,12 @@ export async function loadPowerPlantLOD(): Promise<PowerPlantLOD> {
   }));
 
   lodCache = {
-    coarse: clusterPlants(raw, 10),  // ~10° cells → ~150 clusters
-    medium: clusterPlants(raw, 4),   // ~4° cells  → ~500 clusters
-    fine:   clusterPlants(raw, 1.5), // ~1.5° cells → ~1500 clusters
+    totalCount: raw.length,
+    coarse: clusterPlants(raw, 8),   // ~8° cells  → ~150 clusters
+    medium: clusterPlants(raw, 3),   // ~3° cells  → ~400 clusters
+    fine:   clusterPlants(raw, 1),   // ~1° cells  → ~1200 clusters
+    detail: clusterPlants(raw, 0.4), // ~0.4° cells → ~2500 clusters
+    ultra:  clusterPlants(raw, 0.15),// ~0.15° cells (~17km) → ~4500 clusters
   };
   return lodCache;
 }
@@ -189,7 +200,11 @@ export function getVisibleClusters(
   camLng: number,
   altitude: number,
 ): PowerPlantCluster[] {
-  const tier = altitude > 2.0 ? lod.coarse : altitude > 1.0 ? lod.medium : lod.fine;
+  const tier = altitude > 2.5 ? lod.coarse
+    : altitude > 1.5 ? lod.medium
+    : altitude > 0.8 ? lod.fine
+    : altitude > 0.4 ? lod.detail
+    : lod.ultra;
   return viewportCull(tier, camLat, camLng, altitude);
 }
 
