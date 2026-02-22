@@ -13,6 +13,7 @@ export interface CompareLocation {
   carbon: number;
   region: Region;
   location: string;
+  energyMix?: string;
 }
 
 export const ALL_COMPARE_LOCATIONS: CompareLocation[] = [
@@ -168,7 +169,7 @@ export default function ComparePanel({ selected, onSelectedChange, locations, pr
               {scorecards.map(sc => {
                 const loc = allLocations.find(l => l.id === sc.locationId);
                 const ci = loc?.carbon ?? 0;
-                const features = countryDataToFeatures(ci, '40% gas, 30% coal, 20% hydro, 10% other');
+                const features = countryDataToFeatures(ci, loc?.energyMix ?? '40% gas, 30% coal, 20% hydro, 10% other');
                 const predicted = Math.round(predictCO2(features));
                 const color = getIntensityColor(predicted);
                 return (
@@ -186,7 +187,7 @@ export default function ComparePanel({ selected, onSelectedChange, locations, pr
               {scorecards.map(sc => {
                 const loc = allLocations.find(l => l.id === sc.locationId);
                 const ci = loc?.carbon ?? 0;
-                const features = countryDataToFeatures(ci, '40% gas, 30% coal, 20% hydro, 10% other');
+                const features = countryDataToFeatures(ci, loc?.energyMix ?? '40% gas, 30% coal, 20% hydro, 10% other');
                 const yr = (projectionYear ?? 2025) > 2025 ? projectionYear! : 2050;
                 const sc2 = scenario ?? 'net_zero';
                 const projected = Math.round(predictCO2AtYear(features, yr, SCENARIOS[sc2]));

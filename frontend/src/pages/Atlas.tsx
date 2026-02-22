@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen, Bot, MapPin as MapPinIcon } from 'lucide-react';
 import { GROUND_REGIONS, INITIAL_SATELLITES, type GroundRegion, type SatelliteData } from '@/lib/constants';
 import { fetchTLEGroup, computeOrbitalMetrics, type TLERecord } from '@/lib/tle-service';
-import { propagateAll, type SatelliteCategory } from '@/lib/satellite-store';
+import { propagateAll, BAND_LABELS, type SatelliteCategory } from '@/lib/satellite-store';
 import GlobeView from '@/components/GlobeView';
 import Sidebar from '@/components/Sidebar';
 import OrbitSidebar from '@/components/OrbitSidebar';
@@ -12,6 +12,7 @@ import InventoryPanel, { type InventoryItem } from '@/components/InventoryPanel'
 import ComparePanel, { type CompareLocation } from '@/components/ComparePanel';
 import AddLocationPanel, { type NewLocationData } from '@/components/AddLocationPanel';
 import CountryCard from '@/components/CountryCard';
+import ChatPanel from '@/components/ChatPanel';
 import LocationDetailCard, { type LocationDetail } from '@/components/LocationDetailCard';
 import TimelineBar from '@/components/TimelineBar';
 import { type DataLayers } from '@/components/GlobeView';
@@ -82,8 +83,10 @@ export default function Atlas() {
   const [zoomTarget, setZoomTarget] = useState<{ lat: number; lng: number } | null>(null);
   const [scorecardTarget, setScorecardTarget] = useState<{
     id: string; name: string; body: string; carbon: number;
+    locationData?: Record<string, unknown>;
   } | null>(null);
   const [mintingId, setMintingId] = useState<string | null>(null);
+  const [sidebarMode, setSidebarMode] = useState<'explore' | 'chat'>('explore');
   const [dataLayers, setDataLayers] = useState<DataLayers>({ heatmap: true, powerPlants: false, datacenters: false });
   const [selectedLocation, setSelectedLocation] = useState<LocationDetail | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<{
@@ -399,6 +402,127 @@ export default function Atlas() {
     setInventory(prev => [...prev, ...newItems]);
   };
 
+  /** Build backend-compatible location data from frontend LocationDetail for AI reports */
+  const buildLocationData = (loc: LocationDetail): Record<string, unknown> => {
+    const sat = loc.satellite;
+    const et = loc.extraterrestrial;
+    const region = loc.region;
+
+    if (loc.body === 'orbit' && sat) {
+      const band = sat.status ? (BAND_LABELS[sat.status as import('@/lib/satellite-store').OrbitalBand] ?? sat.status) : 'LEO';
+      return {
+        id: loc.id,
+        name: loc.name,
+        body: 'orbit',
+        coordinates: { lat: sat.lat ?? 0, lng: sat.lng ?? 0 },
+        energy_cost_kwh: sat.powerAvailabilityW ? Math.round(10000 / (sat.powerAvailabilityW / 100)) : 7000,
+        energy_sources: [`solar (${sat.eclipseFraction ? Math.round(sat.eclipseFraction * 100) : 35}% eclipse)`],
+        carbon_intensity_gco2: 0,
+        avg_temperature_c: -170,
+        cooling_method: 'radiative (vacuum)',
+        cooling_cost_factor: 0,
+        land_cost_sqm: 0,
+        construction_cost_mw: 500000000,
+        latency_ms: { earth: sat.latencyMs ?? 10 },
+        disaster_risk: sat.radiationLevel === 'extreme' ? 80 : sat.radiationLevel === 'high' ? 60 : 30,
+        political_stability: 75,
+        regulatory: 'International Space Law',
+        connectivity: ['Ground station pass', 'TDRSS relay'],
+        special_factors: [
+          `${band} band`,
+          `Altitude: ${sat.altitudeKm ?? sat.altitude ?? 0} km`,
+          `Inclination: ${sat.inclination ?? 0}°`,
+          `Period: ${sat.period ?? 0} min`,
+          `Eclipse fraction: ${sat.eclipseFraction ?? 0}`,
+          `Radiation: ${sat.radiationLevel ?? 'unknown'}`,
+          `Power: ${sat.powerAvailabilityW ?? 0} W/m²`,
+          sat.noradId ? `NORAD ${sat.noradId}` : '',
+          sat.category ?? '',
+        ].filter(Boolean),
+        orbital_metrics: {
+          altitude_km: sat.altitudeKm ?? sat.altitude,
+          apogee_km: sat.apogeeKm,
+          perigee_km: sat.perigeeKm,
+          inclination_deg: sat.inclination,
+          period_minutes: sat.period,
+          eclipse_fraction: sat.eclipseFraction,
+          radiation_level: sat.radiationLevel,
+          power_availability_w: sat.powerAvailabilityW,
+          latency_ms: sat.latencyMs,
+          norad_id: sat.noradId,
+          band,
+          category: sat.category,
+        },
+      };
+    }
+
+    if ((loc.body === 'moon' || loc.body === 'mars') && et) {
+      return {
+        id: loc.id,
+        name: loc.name,
+        body: loc.body,
+        coordinates: { lat: et.lat, lng: et.lng },
+        energy_cost_kwh: loc.body === 'moon' ? 12000 : 25000,
+        energy_sources: et.solarIrradianceW > 800 ? ['solar'] : ['nuclear', 'solar'],
+        carbon_intensity_gco2: 0,
+        avg_temperature_c: et.avgTemperatureC,
+        cooling_method: loc.body === 'moon' ? 'radiative (vacuum)' : 'CO₂ atmosphere radiative',
+        cooling_cost_factor: 0,
+        land_cost_sqm: 0,
+        construction_cost_mw: et.constructionCostMw ?? 2000000000,
+        latency_ms: { earth: loc.body === 'moon' ? 1300 : 900000 },
+        disaster_risk: et.dustStormsPerYear ? Math.min(80, et.dustStormsPerYear * 10) : 20,
+        political_stability: 90,
+        regulatory: 'Outer Space Treaty',
+        connectivity: loc.body === 'moon' ? ['Direct Earth link', 'Lunar relay'] : ['DSN relay', 'Mars relay orbit'],
+        special_factors: [
+          `Illumination: ${et.illuminationPct}%`,
+          `Temperature: ${et.avgTemperatureC}°C`,
+          `Solar irradiance: ${et.solarIrradianceW} W/m²`,
+          et.iceProximityKm != null ? `Ice proximity: ${et.iceProximityKm} km` : '',
+          et.earthVisible ? 'Earth visible' : 'No Earth line-of-sight',
+          et.elevationKm != null ? `Elevation: ${et.elevationKm} km` : '',
+        ].filter(Boolean),
+        extraterrestrial_metrics: {
+          illumination_pct: et.illuminationPct,
+          avg_temperature_c: et.avgTemperatureC,
+          ice_proximity_km: et.iceProximityKm,
+          earth_visible: et.earthVisible,
+          solar_irradiance_w: et.solarIrradianceW,
+          dust_storms_per_year: et.dustStormsPerYear,
+          elevation_km: et.elevationKm,
+        },
+      };
+    }
+
+    // Earth: use backend region data if available
+    if (region) {
+      return {
+        id: loc.id,
+        name: loc.name,
+        body: 'earth',
+        coordinates: { lat: region.lat, lng: region.lng },
+        energy_cost_kwh: region.energyCostKwh ?? 0,
+        energy_sources: [],
+        carbon_intensity_gco2: region.carbonIntensity,
+        avg_temperature_c: 20,
+        cooling_method: 'standard',
+        cooling_cost_factor: region.coolingCostFactor ?? 1,
+        land_cost_sqm: region.landCostSqm ?? 0,
+        construction_cost_mw: region.constructionCostMw ?? 10000000,
+        latency_ms: {},
+        disaster_risk: region.disasterRisk ?? 30,
+        political_stability: region.politicalStability ?? 70,
+        regulatory: '',
+        connectivity: [],
+        special_factors: [`Location: ${region.location}`],
+      };
+    }
+
+    // Fallback: minimal data
+    return { id: loc.id, name: loc.name, body: loc.body, carbon_intensity_gco2: loc.carbon };
+  };
+
   const renderSidePanel = () => {
     if (scorecardTarget) {
       return (
@@ -408,6 +532,7 @@ export default function Atlas() {
           body={scorecardTarget.body}
           carbonIntensity={scorecardTarget.carbon}
           customerId={customerId}
+          locationData={scorecardTarget.locationData}
           onClose={() => setScorecardTarget(null)}
           onAddToInventory={handleAddToInventory}
         />
@@ -434,6 +559,7 @@ export default function Atlas() {
                         region: 'earth' as const,
                         carbon: selectedCountry.co2!.co2_intensity_gco2,
                         location: selectedCountry.name,
+                        energyMix: selectedCountry.co2!.energy_mix,
                       }];
                     });
                     if (!compareSelected.includes(id)) {
@@ -443,11 +569,24 @@ export default function Atlas() {
                     setActiveTab('compare');
                   }}
                   onGenerateReport={() => {
+                    const countryId = `candidate-${selectedCountry.name}`;
                     setScorecardTarget({
-                      id: `candidate-${selectedCountry.name}`,
+                      id: countryId,
                       name: selectedCountry.name,
                       body: 'earth',
                       carbon: selectedCountry.co2!.co2_intensity_gco2,
+                      locationData: {
+                        id: countryId,
+                        name: selectedCountry.name,
+                        body: 'earth',
+                        carbon_intensity_gco2: selectedCountry.co2!.co2_intensity_gco2,
+                        coordinates: { lat: 0, lng: 0 },
+                        energy_cost_kwh: 0,
+                        energy_sources: [],
+                        avg_temperature_c: 20,
+                        cooling_method: 'standard',
+                        special_factors: [`Country: ${selectedCountry.name}`],
+                      },
                     });
                   }}
                   onDismiss={() => setSelectedCountry(null)}
@@ -465,6 +604,7 @@ export default function Atlas() {
                       name: selectedLocation.name,
                       body: selectedLocation.body,
                       carbon: selectedLocation.carbon,
+                      locationData: buildLocationData(selectedLocation),
                     });
                   }}
                   onAddToCompare={() => {
@@ -478,6 +618,7 @@ export default function Atlas() {
                         region: selectedLocation.body,
                         carbon: selectedLocation.carbon,
                         location: selectedLocation.region?.location ?? selectedLocation.satellite?.status ?? selectedLocation.body,
+                        energyMix: selectedLocation.countryCO2?.energy_mix,
                       }];
                     });
                     if (!compareSelected.includes(id)) {
@@ -650,8 +791,45 @@ export default function Atlas() {
 
         {/* Sidebar */}
         {sidebarOpen && (
-          <div style={{ flex: activeTab === 'compare' && compareSelected.length > 2 ? `${Math.min(70, 35 + (compareSelected.length - 2) * 8)}` : '35' }} className="overflow-y-auto border-l border-border min-w-[340px] bg-card">
-            {renderSidePanel()}
+          <div style={{ flex: activeTab === 'compare' && compareSelected.length > 2 ? `${Math.min(70, 35 + (compareSelected.length - 2) * 8)}` : '35' }} className="flex flex-col border-l border-border min-w-[340px] bg-card overflow-hidden">
+            {/* Sub-tabs: Explore / AI Chat */}
+            {activeTab === 'map' && !scorecardTarget && (
+              <div className="flex border-b border-border shrink-0">
+                <button
+                  onClick={() => setSidebarMode('explore')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] uppercase tracking-widest font-medium transition-colors ${
+                    sidebarMode === 'explore'
+                      ? 'text-foreground bg-white/[0.04] border-b-2 border-white/30'
+                      : 'text-muted-foreground hover:text-foreground/60'
+                  }`}
+                >
+                  <MapPinIcon className="w-3.5 h-3.5" />
+                  Explore
+                </button>
+                <button
+                  onClick={() => setSidebarMode('chat')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] uppercase tracking-widest font-medium transition-colors ${
+                    sidebarMode === 'chat'
+                      ? 'text-foreground bg-white/[0.04] border-b-2 border-white/30'
+                      : 'text-muted-foreground hover:text-foreground/60'
+                  }`}
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  AI Advisor
+                </button>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto">
+              {activeTab === 'map' && sidebarMode === 'chat' && !scorecardTarget ? (
+                <ChatPanel
+                  onClose={() => setSidebarMode('explore')}
+                  locationContext={selectedLocation ? buildLocationData(selectedLocation) : undefined}
+                />
+              ) : (
+                renderSidePanel()
+              )}
+            </div>
           </div>
         )}
       </div>
