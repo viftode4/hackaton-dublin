@@ -7,6 +7,7 @@ import { estimateCO2, type CO2Estimate } from '@/lib/co2-api';
 import { type PowerPlantLOD, type PowerPlantCluster, type DataCenter, getFuelColor, getProviderColor, getVisibleClusters, viewportCull, FUEL_LEGEND, PROVIDER_LEGEND } from '@/lib/geo-data';
 import { getMoonFeatures, type MoonFeature } from '@/lib/moon-data';
 import { getMarsFeatures, getMarsSolarIrradiance, getMarsDustFrequency, computeMarsFeasibility, type MarsFeature } from '@/lib/mars-data';
+import { type SatelliteCategory, CATEGORY_LABELS, CATEGORY_COLORS, clusterSatellites } from '@/lib/satellite-store';
 import CelestialSwitcher from './CelestialSwitcher';
 
 export interface DataLayers {
@@ -32,6 +33,10 @@ interface Props {
   activeLocation?: { id: string } | null;
   powerPlantLOD?: PowerPlantLOD;
   globalDatacenters?: DataCenter[];
+  activeCategories?: Set<SatelliteCategory>;
+  onActiveCategoriesChange?: (cats: Set<SatelliteCategory>) => void;
+  satelliteSearch?: string;
+  onSatelliteSearchChange?: (search: string) => void;
 }
 
 // Generate orbit trajectory points for a satellite
@@ -79,7 +84,7 @@ const SATELLITE_INFO: Record<string, { size: string; mass: string; altitudeKm: n
   'INMARSAT5': { size: '7.8m × 3.4m', mass: '6,070 kg', altitudeKm: 35786, co2: '85 g CO₂/kWh (solar only)' },
 };
 
-export default function GlobeView({ regions, satellites, routingTarget, celestialBody, onCelestialBodyChange, onLocationClick, zoomTarget, moonLocations, marsLocations, dataLayers, onDataLayersChange, onCountryClick, activeCountry, activeLocation, powerPlantLOD, globalDatacenters }: Props) {
+export default function GlobeView({ regions, satellites, routingTarget, celestialBody, onCelestialBodyChange, onLocationClick, zoomTarget, moonLocations, marsLocations, dataLayers, onDataLayersChange, onCountryClick, activeCountry, activeLocation, powerPlantLOD, globalDatacenters, activeCategories, onActiveCategoriesChange, satelliteSearch, onSatelliteSearchChange }: Props) {
   const globeRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -94,6 +99,22 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   const [marsGeology, setMarsGeology] = useState<any[]>([]);
 
   const config = CELESTIAL_CONFIGS[celestialBody];
+
+  // Filter satellites by active categories and search
+  const filteredSatellites = useMemo(() => {
+    let filtered = satellites;
+    if (activeCategories && celestialBody === 'orbit') {
+      filtered = filtered.filter(s => activeCategories.has(((s as any).category || 'other') as SatelliteCategory));
+    }
+    if (satelliteSearch && celestialBody === 'orbit') {
+      const q = satelliteSearch.toLowerCase();
+      filtered = filtered.filter(s =>
+        s.name.toLowerCase().includes(q) ||
+        (s.noradId && String(s.noradId).includes(q))
+      );
+    }
+    return filtered;
+  }, [satellites, activeCategories, satelliteSearch, celestialBody]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -178,6 +199,17 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
 
   // Points: user's own DCs + viewport-culled global DCs (WebGL)
   const pointsData = useMemo(() => {
+    if (celestialBody === 'orbit') {
+      const clusters = clusterSatellites(filteredSatellites);
+      return clusters.map(c => ({
+        lat: c.lat, lng: c.lng, alt: 0.08,
+        color: c.color,
+        radius: c.count > 5 ? 0.6 : c.count > 1 ? 0.4 : 0.25,
+        label: c.count > 1
+          ? `<b>${c.count} satellites</b><br/>${CATEGORY_LABELS[c.dominantCategory]}`
+          : `<b>${c.satellites[0].name}</b><br/>Alt: ${c.satellites[0].altitudeKm?.toLocaleString()} km`,
+      }));
+    }
     if (celestialBody !== 'earth') return [];
     const pts: any[] = regions.map(r => ({
       lat: r.lat, lng: r.lng, alt: 0.01,
@@ -200,7 +232,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     }
 
     return pts;
-  }, [regions, celestialBody, dataLayers, globalDatacenters, camera]);
+  }, [regions, celestialBody, dataLayers, globalDatacenters, camera, filteredSatellites]);
 
   // Hex bin: power plant clusters rendered as nice hexagonal columns
   const hexBinData = useMemo(() => {
@@ -228,8 +260,8 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       return moonFeatures.slice(0, 40).map(f => ({
         lat: f.lat, lng: f.lng, alt: 0.01,
         text: f.name,
-        color: f.type === 'Mare' ? '#4488aa' : f.type === 'Mons' ? '#aa8844' : '#888888',
-        size: Math.min(0.8, Math.max(0.3, f.diameter_km / 500)),
+        color: f.type === 'Mare' ? '#66bbdd' : f.type === 'Mons' ? '#ddbb66' : '#bbbbbb',
+        size: Math.min(1.0, Math.max(0.4, f.diameter_km / 400)),
       }));
     }
     if (celestialBody === 'mars') {
@@ -237,11 +269,11 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       return marsFeatures.slice(0, 40).map(f => ({
         lat: f.lat, lng: f.lng, alt: 0.01,
         text: f.name,
-        color: f.type === 'Mons' ? '#cc6633'
-          : f.type === 'Planitia' || f.type === 'Planum' ? '#66aa44'
-          : f.type === 'Vallis' || f.type === 'Chasma' ? '#4466cc'
-          : '#aa8866',
-        size: Math.min(0.8, Math.max(0.3, f.diameter_km / 800)),
+        color: f.type === 'Mons' ? '#ee8855'
+          : f.type === 'Planitia' || f.type === 'Planum' ? '#88cc66'
+          : f.type === 'Vallis' || f.type === 'Chasma' ? '#6688ee'
+          : '#ccaa88',
+        size: Math.min(1.0, Math.max(0.4, f.diameter_km / 600)),
       }));
     }
     return [];
@@ -379,14 +411,38 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     if (!el) return;
     const handler = (e: MouseEvent) => {
       if (!globeRef.current) return;
-      // Get the actual canvas element from the Three.js renderer
+      const rd = document.createElement('div');
+      rd.style.cssText = `position:fixed;left:${e.clientX - 5}px;top:${e.clientY - 5}px;width:10px;height:10px;background:red;border-radius:50%;z-index:99999;pointer-events:none;`;
+      document.body.appendChild(rd);
+      setTimeout(() => rd.remove(), 4000);
+      const ctrRect = el.getBoundingClientRect();
       const canvas = globeRef.current.renderer().domElement as HTMLCanvasElement;
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const coords = globeRef.current.toGlobeCoords(x, y);
-      if (coords) {
-        handleGlobeClickRef.current(coords.lat, coords.lng);
+      const cvRect = canvas.getBoundingClientRect();
+      const scEl = canvas.parentElement;
+      const scRect = scEl?.getBoundingClientRect();
+      const xC = e.clientX - ctrRect.left;
+      const yC = e.clientY - ctrRect.top;
+      const xV = e.clientX - cvRect.left;
+      const yV = e.clientY - cvRect.top;
+      const xS = scRect ? e.clientX - scRect.left : -1;
+      const yS = scRect ? e.clientY - scRect.top : -1;
+      const rCanvas = globeRef.current.toGlobeCoords(xV, yV);
+      const rContainer = globeRef.current.toGlobeCoords(xC, yC);
+      const rScene = xS >= 0 ? globeRef.current.toGlobeCoords(xS, yS) : null;
+      // eslint-disable-next-line no-console
+      console.log('=== GLOBE CLICK DEBUG ===', { mouse: [e.clientX, e.clientY], ctrRect: { l: ctrRect.left, t: ctrRect.top, w: ctrRect.width, h: ctrRect.height }, cvRect: { l: cvRect.left, t: cvRect.top, w: cvRect.width, h: cvRect.height }, scRect: scRect ? { l: scRect.left, t: scRect.top, w: scRect.width, h: scRect.height } : null, scTag: scEl?.tagName, scClass: scEl?.className, canvasRel: [xV, yV], containerRel: [xC, yC], sceneRel: [xS, yS], rCanvas, rContainer, rScene, canvasPx: [canvas.width, canvas.height], canvasCSS: [canvas.style.width, canvas.style.height] });
+      const prev = document.getElementById('gdb');
+      if (prev) prev.remove();
+      const d = document.createElement('div');
+      d.id = 'gdb';
+      d.style.cssText = 'position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.92);color:#0f0;padding:12px;font:11px/1.5 monospace;z-index:99999;border-radius:8px;white-space:pre;';
+      const ff = (n: number) => n.toFixed(1);
+      const gc = (c: { lat: number; lng: number } | null) => c ? `${c.lat.toFixed(2)}, ${c.lng.toFixed(2)}` : 'null';
+      d.textContent = `Mouse: ${e.clientX}, ${e.clientY}\n\nContainer: L=${ff(ctrRect.left)} T=${ff(ctrRect.top)} ${ff(ctrRect.width)}x${ff(ctrRect.height)}\nCanvas:    L=${ff(cvRect.left)} T=${ff(cvRect.top)} ${ff(cvRect.width)}x${ff(cvRect.height)}\nScene:     L=${scRect ? ff(scRect.left) : '?'} T=${scRect ? ff(scRect.top) : '?'} ${scRect ? ff(scRect.width) : '?'}x${scRect ? ff(scRect.height) : '?'}\nScene: <${scEl?.tagName}> class="${scEl?.className}"\n\nRel container: ${ff(xC)}, ${ff(yC)}\nRel canvas:    ${ff(xV)}, ${ff(yV)}\nRel scene:     ${ff(xS)}, ${ff(yS)}\n\nGlobe(canvas):    ${gc(rCanvas)}\nGlobe(container): ${gc(rContainer)}\nGlobe(scene):     ${gc(rScene)}\n\nCanvas px: ${canvas.width}x${canvas.height}\nCSS: ${canvas.style.width} ${canvas.style.height}`;
+      document.body.appendChild(d);
+      setTimeout(() => d.remove(), 8000);
+      if (rCanvas) {
+        handleGlobeClickRef.current(rCanvas.lat, rCanvas.lng);
       }
     };
     el.addEventListener('click', handler);
@@ -411,11 +467,19 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       return els;
     }
     if (celestialBody === 'orbit') {
-      return satellites.map(s => ({
-        lat: s.lat, lng: s.lng, alt: s.altitude + 0.01,
-        id: s.id, name: s.name, carbon: s.carbonScore, loc: s.status,
-        isSatellite: true, isClickedPin: false, satData: s,
-      }));
+      if (camera.altitude > 1.8) return [];
+      return filteredSatellites
+        .filter(s => {
+          const dLat = Math.abs(s.lat - camera.lat);
+          const dLng = Math.abs(((s.lng - camera.lng + 540) % 360) - 180);
+          return dLat < 40 && dLng < 40;
+        })
+        .slice(0, 60)
+        .map(s => ({
+          lat: s.lat, lng: s.lng, alt: s.altitude + 0.01,
+          id: s.id, name: s.name, carbon: s.carbonScore, loc: s.status,
+          isSatellite: true, isClickedPin: false, satData: s,
+        }));
     }
     // Moon and Mars: render locations as pins
     if (celestialBody === 'moon' || celestialBody === 'mars') {
@@ -450,7 +514,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       return els;
     }
     return [];
-  }, [regions, satellites, celestialBody, clickedPin, currentLocations]);
+  }, [regions, satellites, celestialBody, clickedPin, currentLocations, camera, filteredSatellites]);
 
   const htmlElementFn = useCallback((d: any) => {
     if (d.isSatellite) {
@@ -472,7 +536,8 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   const MIN_ALT = 1.5;
   const handleZoom = useCallback((pov: { lat: number; lng: number; altitude: number }) => {
     const now = Date.now();
-    const clamped = { lat: pov.lat, lng: pov.lng, altitude: Math.max(pov.altitude, MIN_ALT) };
+    const minAlt = celestialBody === 'orbit' ? 0.5 : MIN_ALT;
+    const clamped = { lat: pov.lat, lng: pov.lng, altitude: Math.max(pov.altitude, minAlt) };
     // Leading: immediate update if 800ms since last
     if (now - lastZoomUpdateRef.current > 800) {
       lastZoomUpdateRef.current = now;
@@ -484,7 +549,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       lastZoomUpdateRef.current = Date.now();
       setCamera(clamped);
     }, 400);
-  }, []);
+  }, [celestialBody]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative">
@@ -681,6 +746,47 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
               {globalDatacenters ? <span className="text-muted-foreground ml-1">({globalDatacenters.length})</span> : null}
             </span>
           </label>
+        </div>
+      )}
+      {celestialBody === 'orbit' && (
+        <div className="absolute bottom-4 left-4 bg-card/80 backdrop-blur-sm border border-border rounded-lg p-3 text-[10px] space-y-2 max-w-[260px]">
+          <div className="flex items-center justify-between">
+            <p className="text-foreground font-semibold text-xs">Satellites</p>
+            <span className="flex items-center gap-1.5">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+              </span>
+              <span className="text-green-400 font-mono text-[9px] font-bold">LIVE</span>
+            </span>
+          </div>
+          <p className="text-muted-foreground font-mono">
+            {filteredSatellites.length.toLocaleString()} of {satellites.length.toLocaleString()} visible
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {(Object.entries(CATEGORY_LABELS) as [SatelliteCategory, string][]).map(([cat, label]) => {
+              const active = activeCategories?.has(cat) ?? true;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => {
+                    if (!onActiveCategoriesChange || !activeCategories) return;
+                    const next = new Set(activeCategories);
+                    if (active) next.delete(cat); else next.add(cat);
+                    onActiveCategoriesChange(next);
+                  }}
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-medium border transition-all ${
+                    active
+                      ? 'border-transparent text-white'
+                      : 'border-border text-muted-foreground bg-transparent opacity-50'
+                  }`}
+                  style={active ? { backgroundColor: CATEGORY_COLORS[cat] + 'cc' } : {}}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
