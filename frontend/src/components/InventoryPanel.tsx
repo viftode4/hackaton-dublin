@@ -1,4 +1,4 @@
-import { Package, Globe, Moon, Orbit, Trash2, MapPin } from 'lucide-react';
+import { Package, Globe, Moon, Orbit, Trash2, MapPin, Zap, CheckCircle, Loader2 } from 'lucide-react';
 
 export interface InventoryItem {
   id: string;          // location_id (for dedup + location lookup)
@@ -26,9 +26,11 @@ interface Props {
   items: InventoryItem[];
   onRemove: (id: string) => void;
   onItemClick: (item: InventoryItem) => void;
+  onMint?: (item: InventoryItem) => void;
+  mintingId?: string | null;
 }
 
-export default function InventoryPanel({ items, onRemove, onItemClick }: Props) {
+export default function InventoryPanel({ items, onRemove, onItemClick, onMint, mintingId }: Props) {
   const totals = {
     capacity: items.reduce((s, i) => s + i.capacityMW, 0),
     avgUtil: items.length ? Math.round(items.reduce((s, i) => s + i.utilization, 0) / items.length) : 0,
@@ -86,6 +88,29 @@ export default function InventoryPanel({ items, onRemove, onItemClick }: Props) 
                     >
                       <MapPin className="w-3.5 h-3.5" />
                     </button>
+                    {item.solanaTxHash ? (
+                      <a
+                        href={`https://explorer.solana.com/tx/${item.solanaTxHash}?cluster=devnet`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-green-500 hover:text-green-400 transition-colors p-1"
+                        title="View on Solana Explorer"
+                      >
+                        <CheckCircle className="w-3.5 h-3.5" />
+                      </a>
+                    ) : item.backendId && onMint ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onMint(item); }}
+                        disabled={mintingId === item.id}
+                        className="text-muted-foreground hover:text-purple-400 transition-colors p-1 disabled:opacity-50"
+                        title="Mint on Solana"
+                      >
+                        {mintingId === item.id
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <Zap className="w-3.5 h-3.5" />}
+                      </button>
+                    ) : null}
                     <button
                       onClick={(e) => { e.stopPropagation(); onRemove(item.id); }}
                       className="text-muted-foreground hover:text-destructive transition-colors p-1"
@@ -94,7 +119,19 @@ export default function InventoryPanel({ items, onRemove, onItemClick }: Props) 
                     </button>
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground mb-2">{item.location} · {item.body}</p>
+                <p className="text-xs text-muted-foreground mb-1">{item.location} · {item.body}</p>
+                {item.solanaTxHash && (
+                  <a
+                    href={`https://explorer.solana.com/tx/${item.solanaTxHash}?cluster=devnet`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="inline-flex items-center gap-1 text-[10px] text-green-500 hover:text-green-400 bg-green-500/10 rounded px-1.5 py-0.5 mb-1 transition-colors"
+                  >
+                    <span>On-chain</span>
+                    <span className="text-green-500/70">{item.solanaTxHash.slice(0, 8)}…</span>
+                  </a>
+                )}
                 <div className="grid grid-cols-4 gap-2 text-center">
                   <div><p className="text-[9px] text-muted-foreground">MW</p><p className="text-xs font-medium text-foreground">{item.capacityMW}</p></div>
                   <div><p className="text-[9px] text-muted-foreground">Util</p><p className="text-xs font-medium text-foreground">{item.utilization}%</p></div>

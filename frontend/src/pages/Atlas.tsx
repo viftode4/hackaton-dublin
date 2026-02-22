@@ -6,10 +6,11 @@ import Sidebar from '@/components/Sidebar';
 import TopNav, { type AppTab } from '@/components/TopNav';
 import ScorecardPanel from '@/components/ScorecardPanel';
 import InventoryPanel, { type InventoryItem } from '@/components/InventoryPanel';
-import ComparePanel from '@/components/ComparePanel';
+import ComparePanel, { type CompareLocation } from '@/components/ComparePanel';
 import AddLocationPanel, { type NewLocationData } from '@/components/AddLocationPanel';
 import { type CelestialBody, type ExtraterrestrialLocation } from '@/lib/celestial';
-import { getLocations, getInventories, createInventory, deleteInventory, type BackendLocation } from '@/lib/api';
+import { getLocations, getInventories, createInventory, deleteInventory, mintToSolana, type BackendLocation } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 
 /** Map a backend location (body=earth) to a GroundRegion for the globe. */
 function toGroundRegion(loc: BackendLocation): GroundRegion {
@@ -47,6 +48,8 @@ function toExtraterrestrialLocation(loc: BackendLocation): ExtraterrestrialLocat
 }
 
 export default function Atlas() {
+  const { user } = useAuth();
+  const customerId = user?.username;
   const [regions, setRegions] = useState<GroundRegion[]>(GROUND_REGIONS);
   const [satellites, setSatellites] = useState<SatelliteData[]>(INITIAL_SATELLITES);
   const [moonLocations, setMoonLocations] = useState<ExtraterrestrialLocation[] | undefined>();
@@ -63,6 +66,7 @@ export default function Atlas() {
   const [scorecardTarget, setScorecardTarget] = useState<{
     id: string; name: string; body: string; carbon: number;
   } | null>(null);
+  const [mintingId, setMintingId] = useState<string | null>(null);
 
   // Map of all backend locations for enriching inventory items
   const locationsRef = useRef<Map<string, BackendLocation>>(new Map());
@@ -144,6 +148,28 @@ export default function Atlas() {
     return () => clearTimeout(t);
   }, []);
 
+  // Build CompareLocation[] from all backend data sources for the compare panel
+  const compareLocations = useMemo<CompareLocation[]>(() => {
+    const locs: CompareLocation[] = [];
+    for (const r of regions) {
+      locs.push({ id: r.id, name: `${r.name} (${r.location})`, body: 'earth', region: 'earth', carbon: r.carbonIntensity, location: r.location });
+    }
+    for (const s of satellites) {
+      locs.push({ id: s.id, name: s.name, body: 'orbit', region: 'orbit', carbon: s.carbonScore, location: s.status });
+    }
+    if (moonLocations) {
+      for (const m of moonLocations) {
+        locs.push({ id: m.id, name: `${m.name} (${m.location})`, body: 'moon', region: 'moon', carbon: m.carbonIntensity, location: m.location });
+      }
+    }
+    if (marsLocations) {
+      for (const m of marsLocations) {
+        locs.push({ id: m.id, name: `${m.name} (${m.location})`, body: 'mars', region: 'mars', carbon: m.carbonIntensity, location: m.location });
+      }
+    }
+    return locs;
+  }, [regions, satellites, moonLocations, marsLocations]);
+
   const handleLocationClick = (id: string, name: string, body: string, carbon: number) => {
     setScorecardTarget({ id, name, body, carbon });
   };
@@ -208,6 +234,21 @@ export default function Atlas() {
     setZoomTarget({ lat: item.lat, lng: item.lng });
   };
 
+  const handleMintToSolana = async (item: InventoryItem) => {
+    if (!item.backendId || item.solanaTxHash) return;
+    setMintingId(item.id);
+    try {
+      const result = await mintToSolana(item.id, item.backendId, customerId);
+      setInventory(prev => prev.map(i =>
+        i.id === item.id ? { ...i, solanaTxHash: result.tx_hash } : i
+      ));
+    } catch (err) {
+      console.error('Mint failed:', err);
+    } finally {
+      setMintingId(null);
+    }
+  };
+
   const handleAddLocation = async (loc: NewLocationData) => {
     const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const capacityMW = loc.capacityMW || 1;
@@ -259,6 +300,7 @@ export default function Atlas() {
           locationName={scorecardTarget.name}
           body={scorecardTarget.body}
           carbonIntensity={scorecardTarget.carbon}
+          customerId={customerId}
           onClose={() => setScorecardTarget(null)}
           onAddToInventory={handleAddToInventory}
         />
@@ -269,9 +311,9 @@ export default function Atlas() {
       case 'map':
         return <Sidebar regions={regions} satellites={satellites} onRoutingComplete={setRoutingTarget} />;
       case 'inventory':
-        return <InventoryPanel items={inventory} onRemove={handleRemoveFromInventory} onItemClick={handleInventoryClick} />;
+        return <InventoryPanel items={inventory} onRemove={handleRemoveFromInventory} onItemClick={handleInventoryClick} onMint={handleMintToSolana} mintingId={mintingId} />;
       case 'compare':
-        return <ComparePanel selected={compareSelected} onSelectedChange={setCompareSelected} />;
+        return <ComparePanel selected={compareSelected} onSelectedChange={setCompareSelected} locations={compareLocations} />;
       case 'add':
         return <AddLocationPanel onAdd={handleAddLocation} onBulkAdd={handleBulkAddLocations} />;
     }

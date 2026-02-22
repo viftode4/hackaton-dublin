@@ -56,10 +56,10 @@ export interface CheckoutResponse {
   error?: string;
 }
 
-export async function createCheckout(locationId: string, locationName: string, email?: string): Promise<CheckoutResponse> {
+export async function createCheckout(locationId: string, locationName: string, email?: string, customerId?: string): Promise<CheckoutResponse> {
   return request('/api/payments/checkout', {
     method: 'POST',
-    body: JSON.stringify({ location_id: locationId, location_name: locationName, email }),
+    body: JSON.stringify({ location_id: locationId, location_name: locationName, email, customer_id: customerId }),
   });
 }
 
@@ -137,5 +137,20 @@ export async function updateInventory(id: number, data: Record<string, unknown>)
   return request<BackendInventory>(`/api/inventories/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ inventory: data }),
+  });
+}
+
+// --- Solana Mint ---
+
+export interface MintResponse {
+  tx_hash: string;
+  explorer_url: string;
+  memo_content: Record<string, unknown>;
+}
+
+export async function mintToSolana(locationId: string, inventoryId: number, customerId?: string): Promise<MintResponse> {
+  return request<MintResponse>('/api/solana/mint', {
+    method: 'POST',
+    body: JSON.stringify({ location_id: locationId, inventory_id: inventoryId, customer_id: customerId }),
   });
 }
