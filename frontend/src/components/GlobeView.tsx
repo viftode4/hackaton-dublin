@@ -320,7 +320,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       setClickedPin({ lat, lng, name: label, co2: 0 });
       onLocationClick?.(`custom-${lat.toFixed(2)}-${lng.toFixed(2)}`, label, 'earth', 0);
     } else if (body === 'moon' || body === 'mars') {
-      // Find nearest predefined location (snap if within ~10°, otherwise create custom)
+      // Find nearest predefined location (snap only if within ~2° — essentially clicking on the pin)
       const DEG2RAD = Math.PI / 180;
       let nearest: ExtraterrestrialLocation | undefined;
       let minDist = Infinity;
@@ -332,7 +332,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
         if (dist < minDist) { minDist = dist; nearest = loc; }
       }
 
-      if (nearest && minDist < 10) {
+      if (nearest && minDist < 2) {
         // Snap to nearest known location
         setClickedPin({ lat: nearest.lat, lng: nearest.lng, name: nearest.name, co2: nearest.carbonIntensity });
         onLocationClick?.(nearest.id, nearest.name, body, nearest.carbonIntensity, undefined, undefined, nearest);
