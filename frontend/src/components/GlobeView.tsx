@@ -372,12 +372,16 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   };
 
   // Native click listener — computes fresh raycast from actual click position
+  // Uses the Globe's internal canvas bounding rect (not containerRef) so coordinates
+  // match what toGlobeCoords expects (relative to the Three.js renderer element).
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const handler = (e: MouseEvent) => {
       if (!globeRef.current) return;
-      const rect = el.getBoundingClientRect();
+      // Get the actual canvas element from the Three.js renderer
+      const canvas = globeRef.current.renderer().domElement as HTMLCanvasElement;
+      const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       const coords = globeRef.current.toGlobeCoords(x, y);
