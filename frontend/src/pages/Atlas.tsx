@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { PanelRightClose, PanelRightOpen, Bot, MapPin as MapPinIcon } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen, Bot, MapPin as MapPinIcon, ArrowUpDown } from 'lucide-react';
 import { GROUND_REGIONS, INITIAL_SATELLITES, type GroundRegion, type SatelliteData } from '@/lib/constants';
 import { fetchTLEGroup, computeOrbitalMetrics, type TLERecord } from '@/lib/tle-service';
 import { propagateAll, BAND_LABELS, type SatelliteCategory } from '@/lib/satellite-store';
@@ -13,6 +13,7 @@ import ComparePanel, { type CompareLocation } from '@/components/ComparePanel';
 import AddLocationPanel, { type NewLocationData } from '@/components/AddLocationPanel';
 import CountryCard from '@/components/CountryCard';
 import ChatPanel from '@/components/ChatPanel';
+import RankingsPanel from '@/components/RankingsPanel';
 import LocationDetailCard, { type LocationDetail } from '@/components/LocationDetailCard';
 import TimelineBar from '@/components/TimelineBar';
 import { type DataLayers } from '@/components/GlobeView';
@@ -86,7 +87,7 @@ export default function Atlas() {
     locationData?: Record<string, unknown>;
   } | null>(null);
   const [mintingId, setMintingId] = useState<string | null>(null);
-  const [sidebarMode, setSidebarMode] = useState<'explore' | 'chat'>('explore');
+  const [sidebarMode, setSidebarMode] = useState<'explore' | 'rankings' | 'chat'>('explore');
   const [dataLayers, setDataLayers] = useState<DataLayers>({ heatmap: true, powerPlants: false, datacenters: false });
   const [selectedLocation, setSelectedLocation] = useState<LocationDetail | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<{
@@ -725,10 +726,10 @@ export default function Atlas() {
           {/* Legend */}
           {celestialBody === 'earth' && (
             <div className="absolute bottom-4 left-4 bg-card/80 backdrop-blur-sm rounded-lg p-3 text-[10px] space-y-1.5 max-w-[180px]">
-              <p className="text-foreground font-semibold text-xs">Existing Datacenter Density</p>
+              <p className="text-foreground font-semibold text-xs">CO₂ Intensity (g/kWh)</p>
               <div className="h-2 w-full rounded" style={{ background: 'linear-gradient(to right, hsl(120,80%,50%), hsl(60,80%,50%), hsl(0,80%,50%))' }} />
               <div className="flex justify-between text-muted-foreground">
-                <span>Low</span><span>High</span>
+                <span>0</span><span>400+</span>
               </div>
             </div>
           )}
@@ -792,31 +793,27 @@ export default function Atlas() {
         {/* Sidebar */}
         {sidebarOpen && (
           <div style={{ flex: activeTab === 'compare' && compareSelected.length > 2 ? `${Math.min(70, 35 + (compareSelected.length - 2) * 8)}` : '35' }} className="flex flex-col border-l border-border min-w-[340px] bg-card overflow-hidden">
-            {/* Sub-tabs: Explore / AI Chat */}
+            {/* Sub-tabs: Explore / Rankings / AI Chat */}
             {activeTab === 'map' && !scorecardTarget && (
               <div className="flex border-b border-border shrink-0">
-                <button
-                  onClick={() => setSidebarMode('explore')}
-                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] uppercase tracking-widest font-medium transition-colors ${
-                    sidebarMode === 'explore'
-                      ? 'text-foreground bg-white/[0.04] border-b-2 border-white/30'
-                      : 'text-muted-foreground hover:text-foreground/60'
-                  }`}
-                >
-                  <MapPinIcon className="w-3.5 h-3.5" />
-                  Explore
-                </button>
-                <button
-                  onClick={() => setSidebarMode('chat')}
-                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] uppercase tracking-widest font-medium transition-colors ${
-                    sidebarMode === 'chat'
-                      ? 'text-foreground bg-white/[0.04] border-b-2 border-white/30'
-                      : 'text-muted-foreground hover:text-foreground/60'
-                  }`}
-                >
-                  <Bot className="w-3.5 h-3.5" />
-                  AI Advisor
-                </button>
+                {([
+                  { id: 'explore' as const, icon: <MapPinIcon className="w-3.5 h-3.5" />, label: 'Explore' },
+                  { id: 'rankings' as const, icon: <ArrowUpDown className="w-3.5 h-3.5" />, label: 'Rankings' },
+                  { id: 'chat' as const, icon: <Bot className="w-3.5 h-3.5" />, label: 'AI Advisor' },
+                ]).map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setSidebarMode(tab.id)}
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-[10px] uppercase tracking-widest font-medium transition-colors ${
+                      sidebarMode === tab.id
+                        ? 'text-foreground bg-white/[0.04] border-b-2 border-white/30'
+                        : 'text-muted-foreground hover:text-foreground/60'
+                    }`}
+                  >
+                    {tab.icon}
+                    {tab.label}
+                  </button>
+                ))}
               </div>
             )}
 
@@ -825,6 +822,11 @@ export default function Atlas() {
                 <ChatPanel
                   onClose={() => setSidebarMode('explore')}
                   locationContext={selectedLocation ? buildLocationData(selectedLocation) : undefined}
+                />
+              ) : activeTab === 'map' && sidebarMode === 'rankings' && !scorecardTarget ? (
+                <RankingsPanel
+                  projectionYear={projectionYear}
+                  scenario={scenario}
                 />
               ) : (
                 renderSidePanel()
