@@ -114,16 +114,28 @@ export function computeOrbitalMetrics(tle: TLERecord): OrbitalMetrics {
   };
 }
 
-/** Fetch TLE data from our backend proxy */
+const CELESTRAK_BASE = 'https://celestrak.org/NORAD/elements/gp.php';
+
+/** Fetch TLE data — try backend proxy first, fall back to direct CelesTrak */
 export async function fetchTLEGroup(group: string): Promise<TLERecord[]> {
-  const res = await fetch(`${API_BASE}/api/tle?group=${encodeURIComponent(group)}`);
-  if (!res.ok) throw new Error(`TLE fetch failed: ${res.status}`);
+  // Try backend proxy first
+  try {
+    const res = await fetch(`${API_BASE}/api/tle?group=${encodeURIComponent(group)}`);
+    if (res.ok) return res.json();
+  } catch { /* proxy unavailable */ }
+  // Fall back to direct CelesTrak fetch
+  const res = await fetch(`${CELESTRAK_BASE}?GROUP=${encodeURIComponent(group)}&FORMAT=JSON`);
+  if (!res.ok) throw new Error(`CelesTrak fetch failed: ${res.status}`);
   return res.json();
 }
 
 export async function fetchTLEByNoradId(catnr: number): Promise<TLERecord[]> {
-  const res = await fetch(`${API_BASE}/api/tle?catnr=${catnr}`);
-  if (!res.ok) throw new Error(`TLE fetch failed: ${res.status}`);
+  try {
+    const res = await fetch(`${API_BASE}/api/tle?catnr=${catnr}`);
+    if (res.ok) return res.json();
+  } catch { /* proxy unavailable */ }
+  const res = await fetch(`${CELESTRAK_BASE}?CATNR=${catnr}&FORMAT=JSON`);
+  if (!res.ok) throw new Error(`CelesTrak fetch failed: ${res.status}`);
   return res.json();
 }
 

@@ -7,7 +7,7 @@ import { estimateCO2, type CO2Estimate } from '@/lib/co2-api';
 import { type PowerPlantLOD, type PowerPlantCluster, type DataCenter, getFuelColor, getProviderColor, getVisibleClusters, viewportCull, FUEL_LEGEND, PROVIDER_LEGEND } from '@/lib/geo-data';
 import { getMoonFeatures, type MoonFeature } from '@/lib/moon-data';
 import { getMarsFeatures, getMarsSolarIrradiance, getMarsDustFrequency, computeMarsFeasibility, type MarsFeature } from '@/lib/mars-data';
-import { type SatelliteCategory, CATEGORY_LABELS, CATEGORY_COLORS, clusterSatellites } from '@/lib/satellite-store';
+import { type SatelliteCategory, CATEGORY_LABELS, CATEGORY_COLORS, clusterSatellites, groupByBand, type ParticleGroup, type OrbitalBand, BAND_COLORS, BAND_LABELS } from '@/lib/satellite-store';
 import CelestialSwitcher from './CelestialSwitcher';
 
 export interface DataLayers {
@@ -117,6 +117,12 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
     return filtered;
   }, [satellites, activeCategories, satelliteSearch, celestialBody]);
 
+  // Particle groups for orbit mode — grouped by orbital band (LEO/MEO/GEO/HEO)
+  const particleGroups = useMemo(() => {
+    if (celestialBody !== 'orbit') return [];
+    return groupByBand(filteredSatellites);
+  }, [filteredSatellites, celestialBody]);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -200,17 +206,6 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
 
   // Points: user's own DCs + viewport-culled global DCs (WebGL)
   const pointsData = useMemo(() => {
-    if (celestialBody === 'orbit') {
-      const clusters = clusterSatellites(filteredSatellites);
-      return clusters.map(c => ({
-        lat: c.lat, lng: c.lng, alt: 0.01,
-        color: c.color,
-        radius: c.count > 10 ? 1.0 : c.count > 3 ? 0.7 : 0.4,
-        label: c.count > 1
-          ? `<b>${c.count} satellites</b><br/>${CATEGORY_LABELS[c.dominantCategory]}`
-          : `<b>${c.satellites[0].name}</b><br/>Alt: ${c.satellites[0].altitudeKm?.toLocaleString()} km`,
-      }));
-    }
     if (celestialBody !== 'earth') return [];
     const pts: any[] = regions.map(r => ({
       lat: r.lat, lng: r.lng, alt: 0.01,
@@ -430,24 +425,69 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
       const xS = scRect ? e.clientX - scRect.left : -1;
       const yS = scRect ? e.clientY - scRect.top : -1;
       const dpr = window.devicePixelRatio || 1;
-      const xDPR = xV * dpr;
-      const yDPR = yV * dpr;
-      const globeW = (globeRef.current as any).width?.() ?? '?';
-      const globeH = (globeRef.current as any).height?.() ?? '?';
+      const renderer = globeRef.current.renderer();
+      const cam = globeRef.current.camera();
+      const rendererDPR = renderer.getPixelRatio();
+      // renderer internal CSS size = canvas pixel size / pixelRatio
+      const rW = canvas.width / rendererDPR;
+      const rH = canvas.height / rendererDPR;
       const rCSS = globeRef.current.toGlobeCoords(xV, yV);
-      const rDPR = globeRef.current.toGlobeCoords(xDPR, yDPR);
+      // Manual NDC using renderer reported size
+      const ndcX = (xV / rW) * 2 - 1;
+      const ndcY = -(yV / rH) * 2 + 1;
+      // Manual NDC using canvas CSS size
+      const csW = parseFloat(canvas.style.width);
+      const csH = parseFloat(canvas.style.height);
+      const ndcX2 = (xV / csW) * 2 - 1;
+      const ndcY2 = -(yV / csH) * 2 + 1;
       // eslint-disable-next-line no-console
-      console.log('=== GLOBE CLICK DEBUG ===', { mouse: [e.clientX, e.clientY], dpr, globeW, globeH, cssCoords: [xV, yV], dprCoords: [xDPR, yDPR], rCSS, rDPR, canvasPx: [canvas.width, canvas.height], canvasCSS: [canvas.style.width, canvas.style.height] });
+      console.log('=== GLOBE CLICK DEBUG ===', {
+        mouse: [e.clientX, e.clientY], dpr, rendererDPR,
+        rendererSize: { w: rW, h: rH },
+        canvasPx: [canvas.width, canvas.height],
+        canvasCSS: [csW, csH],
+        cssCoords: [xV, yV],
+        ndcFromRendererSize: [ndcX, ndcY],
+        ndcFromCanvasCSS: [ndcX2, ndcY2],
+        cameraAspect: (cam as any).aspect,
+        rCSS,
+      });
+      // Reverse projection: where would this lat/lng render on screen?
+      const screenCoords = rCSS ? (globeRef.current as any).getScreenCoords?.(rCSS.lat, rCSS.lng, 0.01) : null;
+      // Also show a BLUE dot where the reverse projection says the pin should render
+      if (screenCoords) {
+        const blueDot = document.createElement('div');
+        blueDot.style.cssText = `position:fixed;left:${cvRect.left + screenCoords.x - 5}px;top:${cvRect.top + screenCoords.y - 5}px;width:10px;height:10px;background:blue;border-radius:50%;z-index:99999;pointer-events:none;`;
+        document.body.appendChild(blueDot);
+        setTimeout(() => blueDot.remove(), 4000);
+      }
       const prev = document.getElementById('gdb');
       if (prev) prev.remove();
       const d = document.createElement('div');
       d.id = 'gdb';
       d.style.cssText = 'position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.92);color:#0f0;padding:12px;font:11px/1.5 monospace;z-index:99999;border-radius:8px;white-space:pre;';
-      const ff = (n: number) => n.toFixed(1);
+      const ff = (n: number) => n.toFixed(4);
       const gc = (c: { lat: number; lng: number } | null) => c ? `${c.lat.toFixed(2)}, ${c.lng.toFixed(2)}` : 'null';
-      d.textContent = `Mouse: ${e.clientX}, ${e.clientY}  DPR: ${dpr}\n\nGlobe internal W: ${globeW}  H: ${globeH}\nCanvas px: ${canvas.width}x${canvas.height}\nCSS: ${canvas.style.width} ${canvas.style.height}\n\nCSS coords: ${ff(xV)}, ${ff(yV)}\nDPR coords: ${ff(xDPR)}, ${ff(yDPR)}\n\nGlobe(CSS):  ${gc(rCSS)}  <-- current\nGlobe(DPR):  ${gc(rDPR)}  <-- DPR-scaled\n\nIf DPR pin is more accurate, we need DPR fix`;
+      d.textContent = [
+        `Mouse: ${e.clientX}, ${e.clientY}`,
+        `DPR: ${dpr}  Renderer DPR: ${rendererDPR}`,
+        ``,
+        `Renderer size: ${rW.toFixed(1)} x ${rH.toFixed(1)}`,
+        `Canvas px: ${canvas.width} x ${canvas.height}`,
+        `Canvas CSS: ${csW} x ${csH}`,
+        `Camera aspect: ${(cam as any).aspect?.toFixed(4)}`,
+        ``,
+        `CSS coords: ${xV.toFixed(1)}, ${yV.toFixed(1)}`,
+        `NDC (renderer): ${ff(ndcX)}, ${ff(ndcY)}`,
+        `NDC (CSS):      ${ff(ndcX2)}, ${ff(ndcY2)}`,
+        ``,
+        `toGlobeCoords: ${gc(rCSS)}`,
+        `getScreenCoords: ${screenCoords ? `${screenCoords.x.toFixed(1)}, ${screenCoords.y.toFixed(1)}` : 'N/A'}`,
+        `Click was at:    ${xV.toFixed(1)}, ${yV.toFixed(1)}`,
+        screenCoords ? `OFFSET: ${(screenCoords.x - xV).toFixed(1)}, ${(screenCoords.y - yV).toFixed(1)}` : '',
+      ].join('\n');
       document.body.appendChild(d);
-      setTimeout(() => d.remove(), 10000);
+      setTimeout(() => d.remove(), 12000);
       if (rCSS) {
         handleGlobeClickRef.current(rCSS.lat, rCSS.lng);
       }
@@ -684,6 +724,14 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
           pathDashLength={1}
           pathDashGap={0}
           pathDashAnimateTime={0}
+          particlesData={particleGroups}
+          particlesList="satellites"
+          particleLat="lat"
+          particleLng="lng"
+          particleAltitude="alt"
+          particlesSize={celestialBody === 'orbit' ? 1.5 : 0}
+          particlesSizeAttenuation={true}
+          particlesColor="color"
           animateIn={true}
         />
       )}
@@ -798,11 +846,16 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
             })}
           </div>
           <div className="border-t border-border/50 pt-2 space-y-1">
-            <p className="text-muted-foreground font-medium text-[9px] uppercase tracking-wider">Carbon Score</p>
-            <div className="h-1.5 w-full rounded-full" style={{ background: 'linear-gradient(to right, hsl(120,80%,55%), hsl(60,80%,55%), hsl(0,80%,55%))' }} />
-            <div className="flex justify-between text-muted-foreground text-[8px]">
-              <span>Low (Clean)</span><span>High</span>
-            </div>
+            <p className="text-muted-foreground font-medium text-[9px] uppercase tracking-wider">Orbital Shells</p>
+            {particleGroups.map(g => (
+              <div key={g.band} className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: g.color }} />
+                  <span className="text-muted-foreground text-[9px]">{BAND_LABELS[g.band]}</span>
+                </div>
+                <span className="text-muted-foreground font-mono text-[9px]">{g.count.toLocaleString()}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
