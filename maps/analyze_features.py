@@ -445,11 +445,22 @@ def main():
             "calgary": "alberta", "ottawa": "ontario", "edmonton": "alberta",
             "winnipeg": "manitoba", "quebec city": "quebec",
         }
+        CITY_TO_US_STATE = {
+            "council bluffs": "iowa", "moncks corner": "south carolina",
+            "columbus": "ohio", "ashburn": "virginia", "dallas": "texas",
+            "the dalles": "oregon", "los angeles": "california",
+            "salt lake city": "utah", "las vegas": "nevada",
+            "san francisco": "california", "portland": "oregon",
+            "des moines": "iowa", "chicago": "illinois",
+            "san antonio": "texas", "seattle": "washington", "phoenix": "arizona",
+        }
         US_STATE_ALIASES = {
             "northern virginia": "virginia",
         }
         if not state and city:
             state = CITY_TO_PROVINCE.get(city.lower(), "")
+        if not state and city:
+            state = CITY_TO_US_STATE.get(city.lower(), "")
         if state.lower() in US_STATE_ALIASES:
             state = US_STATE_ALIASES[state.lower()]
 
@@ -505,6 +516,24 @@ def main():
                 ci_val = cc_mix[country_iso].get("carbon_intensity", np.nan)
             
         features["country_ci"] = ci_val
+
+        # Separate state/province CI feature (independent of zone polygon)
+        state_ci_val = np.nan
+        if country_iso == "USA" and state.lower() in usa_emissions:
+            state_ci_val = usa_emissions[state.lower()]["emissions"] * 0.453592
+        elif country_iso == "CAN" and state.lower() in can_emissions:
+            cmix = can_emissions[state.lower()]
+            state_ci_val = (
+                (cmix.get("coal", 0) / 100.0) * fuel_weights.get("coal", 995) +
+                (cmix.get("naturalGas", 0) / 100.0) * fuel_weights.get("natural_gas", 743) +
+                (cmix.get("petroleum", 0) / 100.0) * fuel_weights.get("petroleum", 816) +
+                (cmix.get("biomass", 0) / 100.0) * fuel_weights.get("biomass", 230) +
+                (cmix.get("solar", 0) / 100.0) * fuel_weights.get("solar", 48) +
+                (cmix.get("wind", 0) / 100.0) * fuel_weights.get("wind", 26) +
+                (cmix.get("hydro", 0) / 100.0) * fuel_weights.get("hydroelectricity", 26) +
+                (cmix.get("nuclear", 0) / 100.0) * fuel_weights.get("nuclear", 29)
+            )
+        features["state_ci"] = state_ci_val
 
         if country_iso in cc_mix:
             emix = cc_mix[country_iso]
@@ -679,10 +708,33 @@ def main():
             features["ct_grid_ci_est"] = np.nan
 
         # Feature: Nearest Electricity Maps zone CI
+        # Prefer polygon-based lookup (more accurate) over KD-tree nearest center
+        _poly_zone_ci = np.nan
+        if zone_poly_tree is not None:
+            _pt2 = _Point(lon, lat)
+            _cands2 = zone_poly_tree.query(_pt2)
+            for _cidx2 in _cands2:
+                if zone_polygons[_cidx2].contains(_pt2):
+                    _zn2 = zone_poly_names[_cidx2]
+                    _zci2 = zone_poly_ci.get(_zn2)
+                    if _zci2 is not None:
+                        _poly_zone_ci = _zci2
+                    break
+            if np.isnan(_poly_zone_ci):
+                _ni2 = zone_poly_tree.nearest(_pt2)
+                if zone_polygons[_ni2].distance(_pt2) < 0.5:
+                    _zn2 = zone_poly_names[_ni2]
+                    _zci2 = zone_poly_ci.get(_zn2)
+                    if _zci2 is not None:
+                        _poly_zone_ci = _zci2
+
         if zone_tree is not None:
             dist_z, ind_z = zone_tree.query(target_rad, k=1)
             dist_z_km = dist_z[0][0] * 6371
-            if dist_z_km < 500:  # only use if within 500 km
+            if not np.isnan(_poly_zone_ci):
+                # Use polygon-based zone CI (fixes KD-tree center mismatches)
+                features["emaps_zone_ci"] = _poly_zone_ci
+            elif dist_z_km < 500:
                 features["emaps_zone_ci"] = float(zone_ci_values[ind_z[0][0]])
             else:
                 features["emaps_zone_ci"] = np.nan
@@ -716,6 +768,9 @@ def main():
             features["emaps_zone_clean_cap_frac"] = np.nan
             features["emaps_zone_fossil_cap_frac"] = np.nan
             features["emaps_zone_coal_cap_mw"] = np.nan
+
+        # Feature: Provider dummy (GCP has systematic positive bias ~+31)
+        features["is_gcp"] = 1.0 if provider == 'gcp' else 0.0
 
         cloud_features.append(features)
 

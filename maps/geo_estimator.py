@@ -841,6 +841,25 @@ def compute_green_score(
             if "country_name" in CODECARBON_MIX[country_iso3]:
                 country_name = CODECARBON_MIX[country_iso3]["country_name"]
 
+    # Separate state/province CI feature (independent of zone polygon)
+    state_ci_val = np.nan
+    if country_iso3 == "USA" and state_name in USA_EMISSIONS:
+        state_ci_val = USA_EMISSIONS[state_name]["emissions"] * 0.453592
+    elif country_iso3 == "CAN" and state_name in CAN_EMISSIONS:
+        _cmix = CAN_EMISSIONS[state_name]
+        state_ci_val = (
+            (_cmix.get("coal", 0) / 100.0) * FUEL_WEIGHTS.get("coal", 995) +
+            (_cmix.get("naturalGas", 0) / 100.0) * FUEL_WEIGHTS.get("natural_gas", 743) +
+            (_cmix.get("petroleum", 0) / 100.0) * FUEL_WEIGHTS.get("petroleum", 816) +
+            (_cmix.get("biomass", 0) / 100.0) * FUEL_WEIGHTS.get("biomass", 230) +
+            (_cmix.get("solar", 0) / 100.0) * FUEL_WEIGHTS.get("solar", 48) +
+            (_cmix.get("wind", 0) / 100.0) * FUEL_WEIGHTS.get("wind", 26) +
+            (_cmix.get("hydro", 0) / 100.0) * FUEL_WEIGHTS.get("hydroelectricity", 26) +
+            (_cmix.get("nuclear", 0) / 100.0) * FUEL_WEIGHTS.get("nuclear", 29)
+        )
+    if np.isnan(state_ci_val):
+        state_ci_val = base_ci  # fall back to base_ci for non-US/CAN
+
     if math.isnan(base_ci):
         base_ci = world_avg
 
@@ -937,22 +956,47 @@ def compute_green_score(
                 local_mean_cf = float(np.mean(cf_valid))
 
     # Electricity Maps nearest zone CI
+    # Prefer polygon-based zone CI (fixes KD-tree center mismatches)
     emaps_zone_ci_val = 0.0
     emaps_idw_ci_val = 0.0
     emaps_zone_clean_cap_frac = 0.0
     emaps_zone_fossil_cap_frac = 0.0
     emaps_zone_coal_cap_mw = 0.0
+
+    # First try polygon lookup for accurate zone CI
+    _poly_zone_ci = None
+    if ZONE_POLY_TREE is not None and ZONE_POLY_CI:
+        from shapely.geometry import Point as _PtZ
+        _ptz = _PtZ(lon, lat)
+        _cands_z = ZONE_POLY_TREE.query(_ptz)
+        for _cidx_z in _cands_z:
+            if ZONE_POLYGONS[_cidx_z].contains(_ptz):
+                _zn_z = ZONE_POLY_NAMES[_cidx_z]
+                _zci_z = ZONE_POLY_CI.get(_zn_z)
+                if _zci_z is not None:
+                    _poly_zone_ci = _zci_z
+                break
+        if _poly_zone_ci is None:
+            _ni_z = ZONE_POLY_TREE.nearest(_ptz)
+            if ZONE_POLYGONS[_ni_z].distance(_ptz) < 0.5:
+                _zn_z = ZONE_POLY_NAMES[_ni_z]
+                _zci_z = ZONE_POLY_CI.get(_zn_z)
+                if _zci_z is not None:
+                    _poly_zone_ci = _zci_z
+
     if EMAPS_ZONE_TREE is not None:
         dist_z, ind_z = EMAPS_ZONE_TREE.query(target_rad, k=1)
         dist_z_km = dist_z[0][0] * 6371
         nearest_idx = ind_z[0][0]
-        if dist_z_km < 500:
+        if _poly_zone_ci is not None:
+            emaps_zone_ci_val = _poly_zone_ci
+        elif dist_z_km < 500:
             emaps_zone_ci_val = float(EMAPS_ZONE_CI[nearest_idx])
-            # Zone-level installed capacity fractions
-            if np.isfinite(EMAPS_ZONE_CLEAN_FRAC[nearest_idx]):
-                emaps_zone_clean_cap_frac = float(EMAPS_ZONE_CLEAN_FRAC[nearest_idx])
-                emaps_zone_fossil_cap_frac = float(EMAPS_ZONE_FOSSIL_FRAC[nearest_idx])
-                emaps_zone_coal_cap_mw = float(EMAPS_ZONE_COAL_MW[nearest_idx])
+        # Capacity fracs from KD-tree nearest (still useful even when CI is polygon-based)
+        if dist_z_km < 500 and np.isfinite(EMAPS_ZONE_CLEAN_FRAC[nearest_idx]):
+            emaps_zone_clean_cap_frac = float(EMAPS_ZONE_CLEAN_FRAC[nearest_idx])
+            emaps_zone_fossil_cap_frac = float(EMAPS_ZONE_FOSSIL_FRAC[nearest_idx])
+            emaps_zone_coal_cap_mw = float(EMAPS_ZONE_COAL_MW[nearest_idx])
         # IDW of top-3 nearest zones
         k_zones = min(3, len(EMAPS_ZONE_KEYS))
         dist_zk, ind_zk = EMAPS_ZONE_TREE.query(target_rad, k=k_zones)
@@ -981,6 +1025,9 @@ def compute_green_score(
             "country_ci_sq": base_ci ** 2 / 1000.0,
             "emaps_zone_ci": emaps_zone_ci_val,
             "emaps_idw_ci": emaps_idw_ci_val,
+            # Engineered features
+            "sqrt_zone_ci": emaps_zone_ci_val ** 0.5 if emaps_zone_ci_val >= 0 else 0.0,
+            "zone_x_country": emaps_zone_ci_val * base_ci / 1000.0,
             # Fraction-based features
             "country_fossil_frac": country_fossil_frac,
             "country_clean_frac": country_clean_frac,
@@ -990,14 +1037,17 @@ def compute_green_score(
             "country_renew_frac": country_renew_frac,
             # Normalized CI: thermal EF × fossil fraction ≈ grid-average
             "ct_grid_ci_est": emissions_per_capacity * country_fossil_frac,
-            # Regional plant-level features (from CT emissions_factor, activity, other5)
+            # Regional plant-level features
             "local_ef_weighted": local_ef_weighted,
             "local_generation_gwh": local_generation_gwh,
             "local_mean_cf": local_mean_cf,
-            # Zone-level installed capacity fractions (from eMaps capacity data)
+            # Zone-level installed capacity fractions
             "emaps_zone_clean_cap_frac": emaps_zone_clean_cap_frac,
             "emaps_zone_fossil_cap_frac": emaps_zone_fossil_cap_frac,
             "emaps_zone_coal_cap_mw": emaps_zone_coal_cap_mw,
+            "state_ci": state_ci_val,
+            # Provider dummy (0.0 at inference = predict actual grid CI)
+            "is_gcp": 0.0,
         }
         x = [feats_dict.get(f, 0.0) for f in REGRESSION_MODEL["features"]]
         x_scaled = (np.array(x) - np.array(REGRESSION_MODEL["scaler_mean"])) / np.array(REGRESSION_MODEL["scaler_scale"])
@@ -1384,6 +1434,9 @@ def predict_grid_batch(
             if np.isnan(base_ci):
                 base_ci = world_avg
 
+        # State CI: batch path has no reverse geocoder, use base_ci as proxy
+        state_ci_val = base_ci
+
         # ── Country fractions ──
         country_fossil_frac = 0.5
         country_clean_frac = 0.5
@@ -1533,20 +1586,26 @@ def predict_grid_batch(
         tb_out[idx] = local_trend_b_val
 
         # ── eMaps zone features ──
+        # Prefer polygon-based zone CI (fixes KD-tree center mismatches)
         emaps_zone_ci_val = 0.0
         emaps_idw_ci_val = 0.0
         emaps_zone_clean_cap_frac = 0.0
         emaps_zone_fossil_cap_frac = 0.0
         emaps_zone_coal_cap_mw = 0.0
+        # Use polygon zone CI when available (more accurate than KD-tree nearest center)
+        _poly_zci = zone_ci_arr[idx] if not np.isnan(zone_ci_arr[idx]) else None
         if EMAPS_ZONE_TREE is not None:
             dist_z_km = ez_dist1[idx, 0] * 6371
             nz = ez_ind1[idx, 0]
-            if dist_z_km < 500:
+            if _poly_zci is not None:
+                emaps_zone_ci_val = _poly_zci
+            elif dist_z_km < 500:
                 emaps_zone_ci_val = float(EMAPS_ZONE_CI[nz])
-                if np.isfinite(EMAPS_ZONE_CLEAN_FRAC[nz]):
-                    emaps_zone_clean_cap_frac = float(EMAPS_ZONE_CLEAN_FRAC[nz])
-                    emaps_zone_fossil_cap_frac = float(EMAPS_ZONE_FOSSIL_FRAC[nz])
-                    emaps_zone_coal_cap_mw = float(EMAPS_ZONE_COAL_MW[nz])
+            # Capacity fracs from KD-tree nearest (still useful even when CI is polygon-based)
+            if dist_z_km < 500 and np.isfinite(EMAPS_ZONE_CLEAN_FRAC[nz]):
+                emaps_zone_clean_cap_frac = float(EMAPS_ZONE_CLEAN_FRAC[nz])
+                emaps_zone_fossil_cap_frac = float(EMAPS_ZONE_FOSSIL_FRAC[nz])
+                emaps_zone_coal_cap_mw = float(EMAPS_ZONE_COAL_MW[nz])
             # IDW of top-k zones
             w_total = 0.0
             w_ci = 0.0
@@ -1572,6 +1631,9 @@ def predict_grid_batch(
             "country_ci_sq": base_ci ** 2 / 1000.0,
             "emaps_zone_ci": emaps_zone_ci_val,
             "emaps_idw_ci": emaps_idw_ci_val,
+            # Engineered features
+            "sqrt_zone_ci": emaps_zone_ci_val ** 0.5 if emaps_zone_ci_val >= 0 else 0.0,
+            "zone_x_country": emaps_zone_ci_val * base_ci / 1000.0,
             "country_fossil_frac": country_fossil_frac,
             "country_clean_frac": country_clean_frac,
             "country_coal_frac": country_coal_frac,
@@ -1585,6 +1647,9 @@ def predict_grid_batch(
             "emaps_zone_clean_cap_frac": emaps_zone_clean_cap_frac,
             "emaps_zone_fossil_cap_frac": emaps_zone_fossil_cap_frac,
             "emaps_zone_coal_cap_mw": emaps_zone_coal_cap_mw,
+            "state_ci": state_ci_val,
+            # Provider dummy (0.0 at inference = predict actual grid CI)
+            "is_gcp": 0.0,
         }
         X[idx] = [feats_dict.get(f, 0.0) for f in feat_names]
 
