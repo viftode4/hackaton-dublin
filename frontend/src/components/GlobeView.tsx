@@ -332,15 +332,13 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
         if (dist < minDist) { minDist = dist; nearest = loc; }
       }
 
+      // Build location data — snap to predefined pin only if very close, otherwise use click coords
+      let etData: ExtraterrestrialLocation;
       if (nearest && minDist < 2) {
-        // Snap to nearest known location
-        setClickedPin({ lat: nearest.lat, lng: nearest.lng, name: nearest.name, co2: nearest.carbonIntensity });
-        onLocationClick?.(nearest.id, nearest.name, body, nearest.carbonIntensity, undefined, undefined, nearest);
-        globeRef.current?.pointOfView({ lat: nearest.lat, lng: nearest.lng, altitude: 1.2 }, 1000);
+        etData = nearest;
       } else {
-        // Custom location — build a synthetic ExtraterrestrialLocation with computed metrics
         const siteName = `${body === 'moon' ? 'Lunar' : 'Martian'} Site (${label})`;
-        const customET: ExtraterrestrialLocation = {
+        etData = {
           id: `custom-${body}-${lat.toFixed(2)}-${lng.toFixed(2)}`,
           name: siteName,
           location: `${lat.toFixed(1)}° lat, ${lng.toFixed(1)}° lng`,
@@ -368,10 +366,10 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
             constructionCostMw: 1.2e9,
           }),
         };
-        setClickedPin({ lat, lng, name: siteName, co2: 0 });
-        onLocationClick?.(customET.id, siteName, body, 0, undefined, undefined, customET);
-        globeRef.current?.pointOfView({ lat, lng, altitude: 1.2 }, 1000);
       }
+      // Place marker at exact click coordinates (no globe animation to avoid perceived shift)
+      setClickedPin({ lat, lng, name: etData.name, co2: etData.carbonIntensity });
+      onLocationClick?.(etData.id, etData.name, body, etData.carbonIntensity, undefined, undefined, etData);
       return;
     }
 
