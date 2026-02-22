@@ -1,15 +1,16 @@
 // frontend/src/lib/regression-model.ts
+// New model (MAE 51.1, R²=0.896) — 6 features, all derivable from country_ci + energy mix
 
 // ── Model coefficients from trained_model.json ──────────────────────
 const MODEL = {
   features: [
-    'country_ci', 'emissions_per_capacity', 'local_pct_coal',
-    'local_pct_clean', 'idw_weighted_ci', 'country_ci_sq', 'emaps_zone_ci',
+    'country_ci', 'emaps_zone_ci', 'sqrt_zone_ci',
+    'zone_x_country', 'country_ci_sq', 'country_coal_frac',
   ],
-  scaler_mean: [362.909, 1349.833, 0.093, 0.682, 683.903, 186.404, 365.001],
-  scaler_scale: [233.883, 968.316, 0.115, 0.224, 227.233, 201.939, 214.582],
-  coefficients: [224.678, -17.126, 51.300, -4.456, 10.280, -84.809, 28.406],
-  intercept: 332.952,
+  scaler_mean: [364.878, 362.808, 17.756, 190.842, 192.305, 0.224],
+  scaler_scale: [243.247, 241.307, 6.893, 210.740, 212.303, 0.243],
+  coefficients: [50.404, 50.659, 113.527, -29.055, -28.720, 55.165],
+  intercept: 333.214,
 } as const;
 
 // ── Scenario definitions ────────────────────────────────────────────
@@ -30,24 +31,27 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
 
 // ── Feature vector for a single location ────────────────────────────
 export interface LocationFeatures {
-  country_ci: number;
-  emissions_per_capacity: number;
-  local_pct_coal: number;
-  local_pct_clean: number;
-  idw_weighted_ci: number;
-  emaps_zone_ci: number;
+  country_ci: number;      // country-level carbon intensity (gCO₂/kWh)
+  emaps_zone_ci: number;   // zone-level carbon intensity
+  country_coal_frac: number; // fraction of electricity from coal (0-1)
 }
 
 // ── Core prediction ─────────────────────────────────────────────────
 export function predictCO2(features: LocationFeatures): number {
+  const { country_ci, emaps_zone_ci, country_coal_frac } = features;
+
+  // Derived features (matching training pipeline in geo_estimator.py)
+  const sqrt_zone_ci = Math.sqrt(Math.max(0, emaps_zone_ci));
+  const zone_x_country = emaps_zone_ci * country_ci / 1000;
+  const country_ci_sq = country_ci ** 2 / 1000;
+
   const raw = [
-    features.country_ci,
-    features.emissions_per_capacity,
-    features.local_pct_coal,
-    features.local_pct_clean,
-    features.idw_weighted_ci,
-    features.country_ci ** 2 / 1000,   // training pipeline scales ci² down by 1000
-    features.emaps_zone_ci,
+    country_ci,
+    emaps_zone_ci,
+    sqrt_zone_ci,
+    zone_x_country,
+    country_ci_sq,
+    country_coal_frac,
   ];
 
   let prediction = MODEL.intercept;
@@ -69,21 +73,12 @@ export function projectFeatures(
   if (dt <= 0) return base;
 
   const coalFactor = Math.pow(1 - scenario.coalDeclineRate, dt);
-  const cleanFactor = Math.pow(1 + scenario.cleanGrowthRate, dt);
-
-  const pctCoal = Math.max(0, Math.min(1, base.local_pct_coal * coalFactor));
-  const pctClean = Math.max(0, Math.min(1, base.local_pct_clean * cleanFactor));
-
-  const fossilDecay = coalFactor;
   const ciDecay = 1 - (1 - coalFactor) * 0.8;
 
   return {
     country_ci: base.country_ci * ciDecay,
-    emissions_per_capacity: base.emissions_per_capacity * fossilDecay,
-    local_pct_coal: pctCoal,
-    local_pct_clean: pctClean,
-    idw_weighted_ci: base.idw_weighted_ci * ciDecay,
     emaps_zone_ci: base.emaps_zone_ci * ciDecay,
+    country_coal_frac: Math.max(0, base.country_coal_frac * coalFactor),
   };
 }
 
@@ -102,35 +97,26 @@ export function countryDataToFeatures(
   co2Intensity: number,
   energyMix: string,
 ): LocationFeatures {
-  const { pctCoal, pctClean } = parseEnergyMixFractions(energyMix);
+  const coalFrac = parseCoalFraction(energyMix);
 
   return {
     country_ci: co2Intensity,
-    emissions_per_capacity: co2Intensity * 3.5,
-    local_pct_coal: pctCoal,
-    local_pct_clean: pctClean,
-    idw_weighted_ci: co2Intensity * 1.1,
-    emaps_zone_ci: co2Intensity,
+    emaps_zone_ci: co2Intensity, // approximate: zone CI ≈ country CI
+    country_coal_frac: coalFrac,
   };
 }
 
-// ── Parse energy mix string to get coal and clean fractions ─────────
-export function parseEnergyMixFractions(mix: string): { pctCoal: number; pctClean: number } {
-  let pctCoal = 0;
-  let pctClean = 0;
-
-  const parts = mix.split('/').map(s => s.trim().toLowerCase());
+// ── Parse energy mix string to get coal fraction ────────────────────
+export function parseCoalFraction(mix: string): number {
+  let coalPct = 0;
+  // Handle both comma-separated and slash-separated formats
+  const parts = mix.split(/[,\/]/).map(s => s.trim().toLowerCase());
   for (const part of parts) {
-    const match = part.match(/^(\d+)%?\s*(.+)/);
+    const match = part.match(/(\d+)%?\s*(.*)/);
     if (!match) continue;
     const pct = parseInt(match[1], 10) / 100;
     const source = match[2].trim();
-
-    if (source.includes('coal')) pctCoal += pct;
-    if (['hydro', 'nuclear', 'wind', 'solar', 'geo', 'geothermal'].some(s => source.includes(s))) {
-      pctClean += pct;
-    }
+    if (source.includes('coal') || source.includes('lignite')) coalPct += pct;
   }
-
-  return { pctCoal, pctClean };
+  return coalPct;
 }
