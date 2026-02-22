@@ -87,8 +87,6 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   const [moonFeatures, setMoonFeatures] = useState<MoonFeature[]>([]);
   const [marsFeatures, setMarsFeatures] = useState<MarsFeature[]>([]);
   const [marsGeology, setMarsGeology] = useState<any[]>([]);
-  // Guard: suppress polygon clicks shortly after a datacenter/satellite click
-  const lastPointClickRef = useRef(0);
 
   const config = CELESTIAL_CONFIGS[celestialBody];
 
@@ -284,7 +282,6 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
   // Click handler — unified: stop rotation, set pin, call parent
   const handleRegionClickRef = useRef<(region: any) => void>(() => {});
   handleRegionClickRef.current = (data: any) => {
-    lastPointClickRef.current = Date.now();
     const c = globeRef.current?.controls();
     if (c) c.autoRotate = false;
 
@@ -314,9 +311,6 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
 
   // Polygon click handler for heatmap countries
   const handlePolygonClick = useCallback((polygon: any, _event: MouseEvent, coords: { lat: number; lng: number }) => {
-    // Suppress polygon click if a datacenter/satellite was just clicked (prevents override)
-    if (Date.now() - lastPointClickRef.current < 500) return;
-
     // Stop auto-rotation so user can examine
     const c = globeRef.current?.controls();
     if (c) c.autoRotate = false;
@@ -500,65 +494,6 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
 
   const showHeatmap = dataLayers?.heatmap ?? true;
 
-  // Country centroids for nearest-country lookup (static once countries load)
-  const countryCentroids = useMemo(() => {
-    return countries.map(c => ({
-      name: c.properties.name as string,
-      ...getCentroid(c.geometry),
-    }));
-  }, [countries]);
-
-  // Dense lat/lng grid mapped to CO₂ intensity for heatmap layer
-  const heatmapGridData = useMemo(() => {
-    if (!showHeatmap || celestialBody !== 'earth' || countryCentroids.length === 0 || countryCO2.size === 0) return [];
-
-    const yr = projectionYear ?? 2025;
-    const sc = scenario ?? 'bau';
-    const DEG2RAD = Math.PI / 180;
-
-    const points: { lat: number; lng: number; weight: number }[] = [];
-
-    for (let lat = -60; lat <= 72; lat += 3) {
-      for (let lng = -180; lng <= 177; lng += 3) {
-        let nearestName = '';
-        let minDist = Infinity;
-
-        for (const c of countryCentroids) {
-          const dLat = (c.lat - lat) * DEG2RAD;
-          const dLng = (c.lng - lng) * DEG2RAD;
-          const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat * DEG2RAD) * Math.cos(c.lat * DEG2RAD) * Math.sin(dLng / 2) ** 2;
-          const dist = 2 * Math.asin(Math.sqrt(a));
-          if (dist < minDist) {
-            minDist = dist;
-            nearestName = c.name;
-          }
-        }
-
-        const co2 = countryCO2.get(nearestName);
-        if (!co2) continue;
-
-        let intensity: number;
-        if (yr > 2025) {
-          const features = countryDataToFeatures(co2.co2_intensity_gco2, co2.energy_mix, co2.country_trend_pct);
-          intensity = predictCO2AtYear(features, yr, SCENARIOS[sc]);
-        } else {
-          intensity = co2.co2_intensity_gco2;
-        }
-
-        points.push({ lat, lng, weight: intensity });
-      }
-    }
-
-    return [points];
-  }, [showHeatmap, celestialBody, countryCentroids, countryCO2, projectionYear, scenario]);
-
-  // Color interpolator: green (low CO₂) → yellow → red (high CO₂)
-  const heatmapColorFn = useCallback(() => (t: number) => {
-    const hue = Math.max(0, 120 - t * 120);
-    const alpha = 0.1 + t * 0.7;
-    return `hsla(${hue}, 80%, 50%, ${alpha})`;
-  }, []);
-
   // Camera tracking via onZoom prop — leading + trailing throttle
   // Clamp altitude to MIN_ALT so LOD/hex resolution freezes below that threshold
   const MIN_ALT = 1.5;
@@ -659,7 +594,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
           labelText="text" labelColor="color" labelSize="size"
           labelDotRadius={0.3} labelResolution={2}
           polygonsData={
-            celestialBody === 'earth' ? countries
+            showHeatmap && celestialBody === 'earth' ? countries
             : celestialBody === 'mars' ? marsGeology
             : []
           }
@@ -673,15 +608,13 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
               if (age.startsWith('N') || age.includes('Noachian')) return 'rgba(180, 80, 60, 0.3)';
               return 'rgba(120, 100, 80, 0.2)';
             }
-            // When dense heatmap is active, make polygon fill transparent (heatmap layer provides color)
-            if (showHeatmap) return 'rgba(0,0,0,0)';
-            // Standard polygon fill when heatmap is off
+            // Earth country heatmap — projected via regression model
             const co2 = countryCO2.get(d.properties.name);
             if (!co2) return 'rgba(100, 100, 100, 0.15)';
             const yr = projectionYear ?? 2025;
             const sc = scenario ?? 'bau';
             if (yr > 2025) {
-              const features = countryDataToFeatures(co2.co2_intensity_gco2, co2.energy_mix, co2.country_trend_pct);
+              const features = countryDataToFeatures(co2.co2_intensity_gco2, co2.energy_mix);
               const projected = predictCO2AtYear(features, yr, SCENARIOS[sc]);
               return getIntensityColor(projected) + '66';
             }
@@ -701,22 +634,13 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
             const yr = projectionYear ?? 2025;
             const sc = scenario ?? 'bau';
             if (yr > 2025) {
-              const features = countryDataToFeatures(co2.co2_intensity_gco2, co2.energy_mix, co2.country_trend_pct);
+              const features = countryDataToFeatures(co2.co2_intensity_gco2, co2.energy_mix);
               const projected = Math.round(predictCO2AtYear(features, yr, SCENARIOS[sc]));
               return `<b>${d.properties.name}</b><br/>${projected} g CO₂/kWh <span style="opacity:0.6">(${yr} est.)</span>`;
             }
             return `<b>${d.properties.name}</b><br/>${co2.co2_intensity_gco2} g CO₂/kWh`;
           }}
           onPolygonClick={handlePolygonClick as any}
-          heatmapsData={heatmapGridData}
-          heatmapPointLat="lat"
-          heatmapPointLng="lng"
-          heatmapPointWeight="weight"
-          heatmapBandwidth={3}
-          heatmapColorFn={heatmapColorFn}
-          heatmapColorSaturation={2.5}
-          heatmapBaseAltitude={0.006}
-          heatmapsTransitionDuration={0}
           htmlElementsData={htmlElementsData}
           htmlLat="lat" htmlLng="lng" htmlAltitude="alt"
           htmlElement={htmlElementFn}
@@ -821,7 +745,7 @@ export default function GlobeView({ regions, satellites, routingTarget, celestia
                 const ranked = Array.from(countryCO2.entries())
                   .map(([name, co2]) => {
                     if (yr > 2025) {
-                      const features = countryDataToFeatures(co2.co2_intensity_gco2, co2.energy_mix, co2.country_trend_pct);
+                      const features = countryDataToFeatures(co2.co2_intensity_gco2, co2.energy_mix);
                       return { name, ci: Math.round(predictCO2AtYear(features, yr, SCENARIOS[sc])) };
                     }
                     return { name, ci: co2.co2_intensity_gco2 };
