@@ -5,6 +5,7 @@ import { fetchTLEGroup, type TLERecord } from '@/lib/tle-service';
 import { propagateAll, type SatelliteCategory } from '@/lib/satellite-store';
 import GlobeView from '@/components/GlobeView';
 import Sidebar from '@/components/Sidebar';
+import OrbitSidebar from '@/components/OrbitSidebar';
 import TopNav, { type AppTab } from '@/components/TopNav';
 import ScorecardPanel from '@/components/ScorecardPanel';
 import InventoryPanel, { type InventoryItem } from '@/components/InventoryPanel';
@@ -476,7 +477,19 @@ export default function Atlas() {
               </div>
             )}
             <div className="flex-1 overflow-y-auto">
-              <Sidebar regions={regions} satellites={satellites} onRoutingComplete={setRoutingTarget} />
+              {celestialBody === 'orbit' ? (
+                <OrbitSidebar
+                  satellites={satellites}
+                  search={satelliteSearch}
+                  onSearchChange={setSatelliteSearch}
+                  onSatelliteClick={(sat) => {
+                    setZoomTarget({ lat: sat.lat, lng: sat.lng });
+                    handleLocationClick(sat.id, sat.name, 'orbit', sat.carbonScore, undefined, sat);
+                  }}
+                />
+              ) : (
+                <Sidebar regions={regions} satellites={satellites} onRoutingComplete={setRoutingTarget} />
+              )}
             </div>
           </div>
         );
@@ -554,48 +567,48 @@ export default function Atlas() {
             </div>
           )}
           {celestialBody === 'moon' && (
-            <div className="absolute bottom-4 left-4 bg-card/80 backdrop-blur-sm rounded-lg p-3 text-[10px] space-y-1.5 max-w-[180px]">
-              <p className="text-foreground font-semibold text-xs">Lunar Features</p>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full" style={{ background: '#4488aa' }} />
-                <span className="text-muted-foreground">Maria (seas)</span>
+            <div className="absolute bottom-4 left-4 bg-black/90 backdrop-blur-sm border border-white/10 rounded-lg p-3.5 text-[11px] space-y-2 max-w-[200px]">
+              <p className="text-white font-semibold text-xs">Lunar Features</p>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#66bbdd', boxShadow: '0 0 4px #66bbdd88' }} />
+                <span className="text-white/70">Maria (seas)</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full" style={{ background: '#aa8844' }} />
-                <span className="text-muted-foreground">Montes (mountains)</span>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#ddbb66', boxShadow: '0 0 4px #ddbb6688' }} />
+                <span className="text-white/70">Montes (mountains)</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full" style={{ background: '#888888' }} />
-                <span className="text-muted-foreground">Craters</span>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#bbbbbb', boxShadow: '0 0 4px #bbbbbb88' }} />
+                <span className="text-white/70">Craters</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-sm" style={{ background: '#00e5ff', width: '8px', height: '8px', transform: 'rotate(45deg)' }} />
-                <span className="text-muted-foreground">Datacenter sites</span>
+              <div className="flex items-center gap-2">
+                <span className="shrink-0" style={{ background: '#00e5ff', width: '12px', height: '12px', transform: 'rotate(45deg)', borderRadius: '2px', boxShadow: '0 0 6px #00e5ff88' }} />
+                <span className="text-white/70 ml-0.5">Datacenter sites</span>
               </div>
             </div>
           )}
           {celestialBody === 'mars' && (
-            <div className="absolute bottom-4 left-4 bg-card/80 backdrop-blur-sm rounded-lg p-3 text-[10px] space-y-1.5 max-w-[180px]">
-              <p className="text-foreground font-semibold text-xs">Mars Geology</p>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-2 rounded-sm" style={{ background: 'rgba(60, 120, 200, 0.5)' }} />
-                <span className="text-muted-foreground">Amazonian (young)</span>
+            <div className="absolute bottom-4 left-4 bg-black/90 backdrop-blur-sm border border-white/10 rounded-lg p-3.5 text-[11px] space-y-2 max-w-[200px]">
+              <p className="text-white font-semibold text-xs">Mars Geology</p>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-2.5 rounded-sm shrink-0" style={{ background: 'rgba(80, 150, 240, 0.8)' }} />
+                <span className="text-white/70">Amazonian (young)</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-2 rounded-sm" style={{ background: 'rgba(200, 140, 60, 0.5)' }} />
-                <span className="text-muted-foreground">Hesperian (mid)</span>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-2.5 rounded-sm shrink-0" style={{ background: 'rgba(230, 170, 70, 0.8)' }} />
+                <span className="text-white/70">Hesperian (mid)</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-2 rounded-sm" style={{ background: 'rgba(180, 80, 60, 0.5)' }} />
-                <span className="text-muted-foreground">Noachian (ancient)</span>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-2.5 rounded-sm shrink-0" style={{ background: 'rgba(210, 100, 70, 0.8)' }} />
+                <span className="text-white/70">Noachian (ancient)</span>
               </div>
-              <div className="flex items-center gap-1.5 mt-1">
-                <span className="w-2 h-2 rounded-full" style={{ background: '#cc6633' }} />
-                <span className="text-muted-foreground">Volcanoes</span>
+              <div className="flex items-center gap-2 mt-1 pt-1 border-t border-white/10">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#ee8855', boxShadow: '0 0 4px #ee885588' }} />
+                <span className="text-white/70">Volcanoes</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full" style={{ background: '#4466cc' }} />
-                <span className="text-muted-foreground">Canyons/Valleys</span>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#6688ee', boxShadow: '0 0 4px #6688ee88' }} />
+                <span className="text-white/70">Canyons/Valleys</span>
               </div>
             </div>
           )}
