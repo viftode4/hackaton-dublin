@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import Globe from 'react-globe.gl';
-import { GroundRegion, SatelliteData, getIntensityColor, USER_LOCATION, updateSatellitePosition } from '@/lib/constants';
+import { GroundRegion, SatelliteData, getIntensityColor, USER_LOCATION } from '@/lib/constants';
 import { CelestialBody, CELESTIAL_CONFIGS, MOON_LOCATIONS, MARS_LOCATIONS, type ExtraterrestrialLocation } from '@/lib/celestial';
 import { getCountryFeatures, getCentroid } from '@/lib/geo-countries';
 import { estimateCO2, type CO2Estimate } from '@/lib/co2-api';

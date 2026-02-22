@@ -114,16 +114,6 @@ export const getIntensityColor = (intensity: number): string => {
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 };
 
-export const updateSatellitePosition = (sat: SatelliteData, elapsedSeconds: number): { lat: number; lng: number } => {
-  if (sat.isStationary) return { lat: sat.startLat, lng: sat.startLng };
-  const t = elapsedSeconds / sat.period;
-  const angle = 2 * Math.PI * t;
-  const lat = sat.inclination * Math.sin(angle + sat.phase);
-  const rawLng = sat.startLng + 360 * t;
-  const lng = ((rawLng % 360) + 540) % 360 - 180;
-  return { lat, lng };
-};
-
 export const formatCountdown = (totalSeconds: number): string => {
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
