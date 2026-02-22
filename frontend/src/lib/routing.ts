@@ -50,11 +50,24 @@ export function recommendLocations(
   };
 
   const candidates = [
-    ...regions.map(r => ({
-      id: r.id, name: r.name, location: r.location, lat: r.lat, lng: r.lng,
-      carbonScore: r.carbonIntensity, isOrbital: false,
-      cost: costIndex[r.id] ?? 50, emissions: emissionsIndex[r.id] ?? 50,
-    })),
+    ...regions.map(r => {
+      const cost = r.energyCostKwh != null
+        ? Math.round(Math.min(100, (r.energyCostKwh / 0.20) * 60
+            + (r.coolingCostFactor ?? 1) * 15
+            + ((r.landCostSqm ?? 50) / 200) * 25))
+        : costIndex[r.id] ?? 50;
+
+      const emissions = r.energyCostKwh != null
+        ? Math.round(Math.min(100, (r.carbonIntensity / 600) * 70
+            + (r.disasterRisk ?? 0.5) * 30))
+        : emissionsIndex[r.id] ?? 50;
+
+      return {
+        id: r.id, name: r.name, location: r.location, lat: r.lat, lng: r.lng,
+        carbonScore: r.carbonIntensity, isOrbital: false,
+        cost, emissions,
+      };
+    }),
     ...satellites.map(s => ({
       id: s.id, name: s.name, location: 'Orbit', lat: s.lat, lng: s.lng,
       carbonScore: s.carbonScore, isOrbital: true,

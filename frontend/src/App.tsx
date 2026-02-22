@@ -12,6 +12,9 @@ import Landing4 from "./pages/Landing4";
 import Landing5 from "./pages/Landing5";
 import Landing6 from "./pages/Landing6";
 import Landing7 from "./pages/Landing7";
+import Landing8 from "./pages/Landing8";
+import Landing9 from "./pages/Landing9";
+import Landing10 from "./pages/Landing10";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Payment from "./pages/Payment";
@@ -38,6 +41,9 @@ const App = () => (
             <Route path="/v5" element={<Landing5 />} />
             <Route path="/v6" element={<Landing6 />} />
             <Route path="/v7" element={<Landing7 />} />
+            <Route path="/v8" element={<Landing8 />} />
+            <Route path="/v9" element={<Landing9 />} />
+            <Route path="/v10" element={<Landing10 />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/payment" element={<Payment />} />

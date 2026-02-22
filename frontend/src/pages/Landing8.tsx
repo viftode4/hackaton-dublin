@@ -1,571 +1,517 @@
-import { useEffect, useRef } from 'react';
+import { Suspense, useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Rocket, ArrowRight } from 'lucide-react';
+import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
+import { useGLTF, Stars } from '@react-three/drei';
+import { EffectComposer, Bloom, ToneMapping } from '@react-three/postprocessing';
+import { KernelSize } from 'postprocessing';
+import * as THREE from 'three';
 import skylyLogo from '@/assets/skyly-logo.png';
-import earthPng from '@/assets/space/earth.png';
-import satellitePng from '@/assets/space/satellite.png';
-import marsPng from '@/assets/space/mars.png';
-import moonPng from '@/assets/space/moon.png';
 
 /* ------------------------------------------------------------------ */
-/*  Variant 8 — "Orbital Orrery"                                       */
-/*  Single 100vh viewport. True CSS perspective parallax with mouse    */
-/*  driven rotateX/Y on a 3D scene. Planets at different translateZ.   */
-/*  Faint SVG orbital rings. Staggered entrance animations. No libs.   */
+/*  Variant 8 — "Orbital Orrery" (3D)                                  */
+/*  Cinematic scene: huge Earth left, animated Sun center, Mars right.  */
+/*  Satellites orbit Earth with neon-green blink. Realistic sun light.  */
 /* ------------------------------------------------------------------ */
 
-/* ── Lerp helper ── */
-function lerp(a: number, b: number, t: number) {
-  return a + (b - a) * t;
-}
+const mouse = { x: 0, y: 0 };
 
-/* ── Star field generator (deterministic) ── */
-function generateStars(count: number): { x: number; y: number; size: number; delay: number }[] {
-  const stars: { x: number; y: number; size: number; delay: number }[] = [];
-  // Simple seeded pseudo-random
-  let seed = 42;
-  const rand = () => {
-    seed = (seed * 16807 + 0) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-  for (let i = 0; i < count; i++) {
-    stars.push({
-      x: rand() * 100,
-      y: rand() * 100,
-      size: rand() * 1.8 + 0.4,
-      delay: rand() * 6,
-    });
-  }
-  return stars;
-}
+const TEXTURES = {
+  earth: '//unpkg.com/three-globe/example/img/earth-blue-marble.jpg',
+  earthBump: '//unpkg.com/three-globe/example/img/earth-topology.png',
+  earthNight: '//unpkg.com/three-globe/example/img/earth-night.jpg',
+  sun: '/textures/sun.jpg',
+  mars: '/textures/mars.jpg',
+  moon: '/textures/moon.jpg',
+};
 
-const STARS = generateStars(90);
+/* ── Preload all assets in module scope so Suspense never remounts ── */
+useLoader.preload(THREE.TextureLoader, TEXTURES.earth);
+useLoader.preload(THREE.TextureLoader, TEXTURES.earthBump);
+useLoader.preload(THREE.TextureLoader, TEXTURES.earthNight);
+useLoader.preload(THREE.TextureLoader, TEXTURES.sun);
+useLoader.preload(THREE.TextureLoader, TEXTURES.mars);
+useLoader.preload(THREE.TextureLoader, TEXTURES.moon);
+useGLTF.preload('/models/satellite.glb');
 
-/* ── CSS as template literal ── */
-const STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap');
-
-  .orrery-root {
-    position: relative;
-    width: 100vw;
-    height: 100vh;
-    overflow: hidden;
-    background: hsl(224 56% 7%);
-    font-family: 'Inter', sans-serif;
-    color: #e0e6f0;
-    cursor: default;
-    user-select: none;
+/* ── Rim-light shader for planet edges where light hits ── */
+const rimVertexShader = /* glsl */ `
+  varying vec3 vNormal;
+  varying vec3 vWorldPos;
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
-
-  /* ── Star background ── */
-  .orrery-star {
-    position: absolute;
-    border-radius: 50%;
-    background: #ffffff;
-    animation: orrery-twinkle 4s ease-in-out infinite;
-    pointer-events: none;
-  }
-  @keyframes orrery-twinkle {
-    0%, 100% { opacity: 0.25; }
-    50% { opacity: 0.85; }
-  }
-
-  /* ── Perspective container ── */
-  .orrery-perspective {
-    position: absolute;
-    inset: 0;
-    perspective: 1200px;
-    perspective-origin: 50% 50%;
-  }
-
-  /* ── 3D scene that rotates ── */
-  .orrery-scene {
-    position: absolute;
-    inset: 0;
-    transform-style: preserve-3d;
-    will-change: transform;
-    transition: none;
-  }
-
-  /* ── Orbital rings ── */
-  .orrery-rings-container {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transform-style: preserve-3d;
-    pointer-events: none;
-  }
-  .orrery-ring-svg {
-    position: absolute;
-    transform-style: preserve-3d;
-  }
-  .orrery-ring-path {
-    fill: none;
-    stroke: #00e5ff;
-    stroke-linecap: round;
-    stroke-dasharray: 2400;
-    stroke-dashoffset: 2400;
-  }
-  .orrery-ring-path.ring-animate {
-    animation: orrery-draw-ring 2.2s ease-out forwards;
-  }
-  .orrery-ring-1 { animation-delay: 0.3s !important; opacity: 0.2; stroke-width: 1; }
-  .orrery-ring-2 { animation-delay: 0.6s !important; opacity: 0.15; stroke-width: 0.8; }
-  .orrery-ring-3 { animation-delay: 0.9s !important; opacity: 0.12; stroke-width: 0.6; }
-  @keyframes orrery-draw-ring {
-    to { stroke-dashoffset: 0; }
-  }
-
-  /* ── Planet / body positioning ── */
-  .orrery-body {
-    position: absolute;
-    transform-style: preserve-3d;
-    opacity: 0;
-    animation: orrery-body-in 1.2s ease-out forwards;
-    pointer-events: none;
-  }
-  .orrery-body img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    filter: drop-shadow(0 0 30px rgba(0, 229, 255, 0.12));
-  }
-  @keyframes orrery-body-in {
-    from { opacity: 0; transform: scale(0.8) translateZ(var(--tz)); }
-    to   { opacity: 1; transform: scale(1)   translateZ(var(--tz)); }
-  }
-
-  /* planet-specific */
-  .orrery-earth {
-    width: 20vw; height: 20vw;
-    left: 8%;
-    top: 50%;
-    margin-top: -10vw;
-    --tz: -200px;
-    transform: translateZ(-200px);
-    animation-delay: 0.2s;
-  }
-  .orrery-satellite {
-    width: 14vw; height: 14vw;
-    right: 8%;
-    top: 12%;
-    --tz: 100px;
-    transform: translateZ(100px);
-    animation-delay: 0.4s;
-  }
-  .orrery-moon {
-    width: 10vw; height: 10vw;
-    right: 15%;
-    bottom: 14%;
-    --tz: -100px;
-    transform: translateZ(-100px);
-    animation-delay: 0.6s;
-  }
-  .orrery-mars {
-    width: 15vw; height: 15vw;
-    left: 12%;
-    bottom: 10%;
-    --tz: 50px;
-    transform: translateZ(50px);
-    animation-delay: 0.8s;
-  }
-
-  /* ── Body labels ── */
-  .orrery-label {
-    position: absolute;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: rgba(0, 229, 255, 0.35);
-    white-space: nowrap;
-    pointer-events: none;
-  }
-  .orrery-earth .orrery-label  { bottom: -1.6rem; left: 50%; transform: translateX(-50%); }
-  .orrery-satellite .orrery-label { bottom: -1.6rem; left: 50%; transform: translateX(-50%); }
-  .orrery-moon .orrery-label   { bottom: -1.4rem; left: 50%; transform: translateX(-50%); }
-  .orrery-mars .orrery-label   { bottom: -1.6rem; left: 50%; transform: translateX(-50%); }
-
-  /* ── Navbar ── */
-  .orrery-nav {
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1.25rem 2.5rem;
-    z-index: 20;
-    opacity: 0;
-    animation: orrery-fade-in 1s ease-out 0.1s forwards;
-  }
-  .orrery-nav-brand {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-  }
-  .orrery-nav-brand img {
-    height: 28px;
-    width: auto;
-  }
-  .orrery-nav-brand span {
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 600;
-    font-size: 1.1rem;
-    letter-spacing: 0.15em;
-    color: #ffffff;
-  }
-  .orrery-signin-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.5rem 1.25rem;
-    border: 1px solid rgba(0, 229, 255, 0.35);
-    border-radius: 6px;
-    background: rgba(0, 229, 255, 0.06);
-    color: #00e5ff;
-    font-family: 'Inter', sans-serif;
-    font-size: 0.85rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.25s, border-color 0.25s;
-    pointer-events: auto;
-  }
-  .orrery-signin-btn:hover {
-    background: rgba(0, 229, 255, 0.14);
-    border-color: rgba(0, 229, 255, 0.6);
-  }
-
-  /* ── Hero ── */
-  .orrery-hero {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    z-index: 10;
-    transform-style: preserve-3d;
-    pointer-events: none;
-  }
-  .orrery-hero-inner {
-    transform: translateZ(60px);
-    max-width: 680px;
-    padding: 0 1.5rem;
-    opacity: 0;
-    animation: orrery-hero-in 1.4s ease-out 0.5s forwards;
-  }
-  @keyframes orrery-hero-in {
-    from { opacity: 0; transform: translateZ(60px) translateY(30px); }
-    to   { opacity: 1; transform: translateZ(60px) translateY(0); }
-  }
-  .orrery-hero h1 {
-    font-size: clamp(1.8rem, 4vw, 3.2rem);
-    font-weight: 700;
-    line-height: 1.18;
-    margin: 0 0 0.5rem;
-    color: #ffffff;
-  }
-  .orrery-hero h1 .accent {
-    color: #00e5ff;
-  }
-  .orrery-hero p {
-    font-size: clamp(0.95rem, 1.5vw, 1.15rem);
-    color: rgba(224, 230, 240, 0.6);
-    margin: 0 0 2rem;
-    font-weight: 300;
-    line-height: 1.55;
-  }
-
-  /* ── CTA button ── */
-  .orrery-cta {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.85rem 2.2rem;
-    border-radius: 8px;
-    border: none;
-    background: linear-gradient(135deg, #00e5ff 0%, #0090b0 100%);
-    color: hsl(224 56% 7%);
-    font-family: 'Inter', sans-serif;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    pointer-events: auto;
-    transition: transform 0.2s, box-shadow 0.3s;
-    box-shadow: 0 0 24px rgba(0, 229, 255, 0.2);
-  }
-  .orrery-cta:hover {
-    transform: translateY(-2px) scale(1.03);
-    box-shadow: 0 0 40px rgba(0, 229, 255, 0.35);
-  }
-  .orrery-cta svg {
-    transition: transform 0.2s;
-  }
-  .orrery-cta:hover svg {
-    transform: translateX(3px);
-  }
-
-  /* ── Stats bar ── */
-  .orrery-stats {
-    position: absolute;
-    bottom: 3.5rem;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    align-items: center;
-    gap: 2rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
-    letter-spacing: 0.08em;
-    color: rgba(224, 230, 240, 0.4);
-    z-index: 10;
-    opacity: 0;
-    animation: orrery-fade-in 1s ease-out 1.2s forwards;
-    white-space: nowrap;
-  }
-  .orrery-stats-dot {
-    width: 3px; height: 3px;
-    border-radius: 50%;
-    background: rgba(0, 229, 255, 0.4);
-    flex-shrink: 0;
-  }
-
-  /* ── Footer ── */
-  .orrery-footer {
-    position: absolute;
-    bottom: 0.8rem;
-    left: 0; right: 0;
-    text-align: center;
-    font-size: 0.65rem;
-    color: rgba(224, 230, 240, 0.2);
-    z-index: 10;
-    opacity: 0;
-    animation: orrery-fade-in 1s ease-out 1.4s forwards;
-  }
-
-  /* ── Shared fade-in ── */
-  @keyframes orrery-fade-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-  }
-
-  /* ── Ambient drift for idle state ── */
-  @keyframes orrery-ambient-drift {
-    0%   { transform: rotateX(0.5deg) rotateY(0.8deg); }
-    25%  { transform: rotateX(-0.3deg) rotateY(-0.5deg); }
-    50%  { transform: rotateX(0.4deg) rotateY(-0.7deg); }
-    75%  { transform: rotateX(-0.5deg) rotateY(0.6deg); }
-    100% { transform: rotateX(0.5deg) rotateY(0.8deg); }
+`;
+const rimFragmentShader = /* glsl */ `
+  uniform vec3 uLightPos;
+  uniform vec3 uRimColor;
+  uniform float uRimPower;
+  varying vec3 vNormal;
+  varying vec3 vWorldPos;
+  void main() {
+    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+    vec3 lightDir = normalize(uLightPos - vWorldPos);
+    float rim = 1.0 - max(dot(viewDir, vNormal), 0.0);
+    rim = pow(rim, uRimPower);
+    // Only glow on the lit side
+    float lit = max(dot(vNormal, lightDir), 0.0);
+    float glow = rim * pow(lit, 0.3);
+    gl_FragColor = vec4(uRimColor, glow * 0.6);
   }
 `;
 
-export default function Landing8() {
-  const navigate = useNavigate();
-  const sceneRef = useRef<HTMLDivElement>(null);
-  const rafRef = useRef(0);
-  const mouseTarget = useRef({ rx: 0, ry: 0 });
-  const mouseCurrent = useRef({ rx: 0, ry: 0 });
-  const hasMouseMoved = useRef(false);
+/* ── Textured rotating planet with rim light + bump map + optional city lights ── */
+function Planet({
+  textureUrl,
+  bumpUrl,
+  bumpScale = 0.04,
+  emissiveMapUrl,
+  emissiveIntensity = 0,
+  radius,
+  position,
+  rotationSpeed = 0.002,
+  tilt = 0,
+  atmosphereColor,
+  rimColor = '#ffffff',
+}: {
+  textureUrl: string;
+  bumpUrl?: string;
+  bumpScale?: number;
+  emissiveMapUrl?: string;
+  emissiveIntensity?: number;
+  radius: number;
+  position: [number, number, number];
+  rotationSpeed?: number;
+  tilt?: number;
+  atmosphereColor?: string;
+  rimColor?: string;
+}) {
+  const meshRef = useRef<THREE.Mesh>(null!);
+  const texture = useLoader(THREE.TextureLoader, textureUrl);
+  const bumpTex = useLoader(THREE.TextureLoader, bumpUrl || textureUrl);
+  const emissiveTex = useLoader(THREE.TextureLoader, emissiveMapUrl || textureUrl);
 
-  useEffect(() => {
-    const MAX_DEG = 8;
-    const LERP_SPEED = 0.06;
+  const rimUniforms = useMemo(() => ({
+    uLightPos: { value: new THREE.Vector3(1, 0.3, -6) },
+    uRimColor: { value: new THREE.Color(rimColor) },
+    uRimPower: { value: 2.5 },
+  }), [rimColor]);
 
-    const handleMouseMove = (e: MouseEvent) => {
-      hasMouseMoved.current = true;
-      const nx = (e.clientX / window.innerWidth - 0.5) * 2;   // -1..1
-      const ny = (e.clientY / window.innerHeight - 0.5) * 2;  // -1..1
-      mouseTarget.current = {
-        rx: -ny * MAX_DEG,  // tilt up when mouse is down
-        ry: nx * MAX_DEG,   // rotate right when mouse is right
-      };
-    };
-
-    let ambientTime = 0;
-
-    const tick = () => {
-      if (!sceneRef.current) {
-        rafRef.current = requestAnimationFrame(tick);
-        return;
-      }
-
-      if (hasMouseMoved.current) {
-        mouseCurrent.current.rx = lerp(mouseCurrent.current.rx, mouseTarget.current.rx, LERP_SPEED);
-        mouseCurrent.current.ry = lerp(mouseCurrent.current.ry, mouseTarget.current.ry, LERP_SPEED);
-      } else {
-        // Ambient drift when no mouse interaction
-        ambientTime += 0.008;
-        mouseCurrent.current.rx = Math.sin(ambientTime * 0.7) * 1.2;
-        mouseCurrent.current.ry = Math.cos(ambientTime * 0.5) * 1.5;
-      }
-
-      sceneRef.current.style.transform =
-        `rotateX(${mouseCurrent.current.rx}deg) rotateY(${mouseCurrent.current.ry}deg)`;
-
-      rafRef.current = requestAnimationFrame(tick);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    rafRef.current = requestAnimationFrame(tick);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      cancelAnimationFrame(rafRef.current);
-    };
-  }, []);
-
-  // Trigger ring animations after mount
-  const ringsRef = useRef<SVGPathElement[]>([]);
-
-  useEffect(() => {
-    // Small delay so elements are mounted
-    const timer = setTimeout(() => {
-      ringsRef.current.forEach((p) => p?.classList.add('ring-animate'));
-    }, 100);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const addRingRef = (i: number) => (el: SVGPathElement | null) => {
-    if (el) ringsRef.current[i] = el;
-  };
+  useFrame(() => {
+    if (meshRef.current) meshRef.current.rotation.y += rotationSpeed;
+  });
 
   return (
-    <div className="orrery-root">
-      <style>{STYLES}</style>
-
-      {/* Star field */}
-      {STARS.map((s, i) => (
-        <div
-          key={i}
-          className="orrery-star"
-          style={{
-            left: `${s.x}%`,
-            top: `${s.y}%`,
-            width: s.size,
-            height: s.size,
-            animationDelay: `${s.delay}s`,
-          }}
+    <group position={position} rotation={[tilt, 0, 0]}>
+      <mesh ref={meshRef}>
+        <sphereGeometry args={[radius, 64, 64]} />
+        <meshStandardMaterial
+          map={texture}
+          bumpMap={bumpTex}
+          bumpScale={bumpScale}
+          roughness={0.75}
+          metalness={0.02}
+          {...(emissiveMapUrl ? {
+            emissiveMap: emissiveTex,
+            emissive: new THREE.Color('#ffddaa'),
+            emissiveIntensity,
+          } : {})}
         />
-      ))}
+      </mesh>
+      {/* Rim light glow where light meets edge */}
+      <mesh>
+        <sphereGeometry args={[radius * 1.008, 64, 64]} />
+        <shaderMaterial
+          uniforms={rimUniforms}
+          vertexShader={rimVertexShader}
+          fragmentShader={rimFragmentShader}
+          transparent
+          depthWrite={false}
+          side={THREE.FrontSide}
+        />
+      </mesh>
+      {atmosphereColor && (
+        <mesh>
+          <sphereGeometry args={[radius * 1.015, 32, 32]} />
+          <meshBasicMaterial color={atmosphereColor} transparent opacity={0.1} side={THREE.BackSide} />
+        </mesh>
+      )}
+    </group>
+  );
+}
 
-      {/* Navigation */}
-      <nav className="orrery-nav">
-        <div className="orrery-nav-brand">
-          <img src={skylyLogo} alt="Skyly" />
-          <span>SKYLY</span>
+/* ── Sun — bright core, bloom handles glow ── */
+function Sun({
+  position,
+  radius,
+}: {
+  position: [number, number, number];
+  radius: number;
+}) {
+  return (
+    <group position={position}>
+      <pointLight intensity={350} color="#fff8ee" distance={200} decay={0.8} />
+      <pointLight intensity={60} color="#fff0dd" distance={200} decay={0.6} />
+
+      {/* Core — HDR bright sphere, values > 1.0 so only it exceeds bloom threshold */}
+      <mesh>
+        <sphereGeometry args={[radius, 48, 48]} />
+        <meshBasicMaterial color={[3, 2.8, 2.4]} toneMapped={false} />
+      </mesh>
+    </group>
+  );
+}
+
+/* ── GLTF Satellite with neon-green blink ── */
+function BlinkingSatellite({
+  orbitRadius,
+  orbitSpeed,
+  orbitTilt,
+  scale = 0.06,
+  startAngle = 0,
+  blinkOffset = 0,
+}: {
+  orbitRadius: number;
+  orbitSpeed: number;
+  orbitTilt: number;
+  scale?: number;
+  startAngle?: number;
+  blinkOffset?: number;
+}) {
+  const { scene } = useGLTF('/models/satellite.glb');
+  const pivotRef = useRef<THREE.Group>(null!);
+  const satRef = useRef<THREE.Group>(null!);
+  const lightRef = useRef<THREE.PointLight>(null!);
+  const clonedScene = useMemo(() => scene.clone(), [scene]);
+
+  useFrame((state, delta) => {
+    if (pivotRef.current) pivotRef.current.rotation.y += orbitSpeed * delta;
+    if (satRef.current) satRef.current.rotation.y += 0.3 * delta;
+    // Neon green blink: 0.3s on, 1.7s off cycle
+    if (lightRef.current) {
+      const phase = (state.clock.elapsedTime + blinkOffset) % 2.0;
+      lightRef.current.intensity = phase < 0.3 ? 4 : 0;
+    }
+  });
+
+  return (
+    <group rotation={[orbitTilt, 0, 0]}>
+      <group ref={pivotRef} rotation={[0, startAngle, 0]}>
+        <group ref={satRef} position={[orbitRadius, 0, 0]} scale={scale}>
+          <primitive object={clonedScene} />
+          {/* Neon green blinking beacon */}
+          <pointLight ref={lightRef} color="#00ff66" intensity={4} distance={4} decay={2} />
+        </group>
+      </group>
+    </group>
+  );
+}
+
+/* ── Orbital ring (thin torus) ── */
+function OrbitalRing({
+  radius,
+  tiltX = 0,
+  tiltZ = 0,
+  color = '#ffffff',
+  opacity = 0.08,
+}: {
+  radius: number;
+  tiltX?: number;
+  tiltZ?: number;
+  color?: string;
+  opacity?: number;
+}) {
+  return (
+    <mesh rotation={[Math.PI / 2 + tiltX, 0, tiltZ]}>
+      <torusGeometry args={[radius, 0.006, 16, 128]} />
+      <meshBasicMaterial color={color} transparent opacity={opacity} />
+    </mesh>
+  );
+}
+
+/* ── Parallax layer — each object gets its own parallax factor ── */
+function ParallaxLayer({
+  factor,
+  children,
+}: {
+  factor: number;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<THREE.Group>(null!);
+  const current = useRef({ x: 0, y: 0 });
+
+  useFrame(() => {
+    if (!ref.current) return;
+    const tx = -mouse.y * 0.012 * factor;
+    const ty = mouse.x * 0.015 * factor;
+    current.current.x += (tx - current.current.x) * 0.03;
+    current.current.y += (ty - current.current.y) * 0.03;
+    ref.current.rotation.x = current.current.x;
+    ref.current.rotation.y = current.current.y;
+  });
+
+  return <group ref={ref}>{children}</group>;
+}
+
+/* ── Scene — depth-based parallax per object ── */
+function OrreryScene() {
+  return (
+    <>
+      {/* ── SUN — fixed / barely moves ── */}
+      <ParallaxLayer factor={0.15}>
+        <Sun position={[1, 0.3, -6]} radius={1.5} />
+      </ParallaxLayer>
+
+      {/* ── MARS — far, less parallax ── */}
+      <ParallaxLayer factor={0.4}>
+        <Planet
+          textureUrl={TEXTURES.mars}
+          bumpScale={0.05}
+          radius={1.8}
+          position={[8, -0.3, -3]}
+          rotationSpeed={0.0004}
+          tilt={0.44}
+          atmosphereColor="#e08040"
+          rimColor="#ff9060"
+        />
+      </ParallaxLayer>
+
+      {/* ── MOON — mid distance ── */}
+      <ParallaxLayer factor={0.6}>
+        <Planet
+          textureUrl={TEXTURES.moon}
+          bumpScale={0.05}
+          radius={0.7}
+          position={[-1.5, 3.2, 2]}
+          rotationSpeed={0.0002}
+          tilt={0.1}
+          rimColor="#dddddd"
+        />
+      </ParallaxLayer>
+
+      {/* ── EARTH + SATELLITES — closest, most parallax ── */}
+      <ParallaxLayer factor={1.0}>
+        <group position={[-6, -1, 4]}>
+          <Planet
+            textureUrl={TEXTURES.earth}
+            bumpUrl={TEXTURES.earthBump}
+            bumpScale={0.06}
+            emissiveMapUrl={TEXTURES.earthNight}
+            emissiveIntensity={1.5}
+            radius={4.5}
+            position={[0, 0, 0]}
+            rotationSpeed={0.0003}
+            tilt={0.41}
+            atmosphereColor="#00aaff"
+            rimColor="#88ccff"
+          />
+          <BlinkingSatellite
+            orbitRadius={5.4}
+            orbitSpeed={0.3}
+            orbitTilt={0.35}
+            scale={0.05}
+            startAngle={0}
+            blinkOffset={0}
+          />
+          <BlinkingSatellite
+            orbitRadius={6.2}
+            orbitSpeed={-0.2}
+            orbitTilt={-0.5}
+            scale={0.04}
+            startAngle={Math.PI * 0.7}
+            blinkOffset={1.0}
+          />
+          <OrbitalRing radius={5.4} tiltX={-0.35 + Math.PI / 2} color="#00ff66" opacity={0.04} />
+          <OrbitalRing radius={6.2} tiltX={0.5 + Math.PI / 2} color="#00ff66" opacity={0.03} />
+        </group>
+      </ParallaxLayer>
+    </>
+  );
+}
+
+/* ── Camera ── */
+function CameraSetup() {
+  const { camera } = useThree();
+  useEffect(() => {
+    camera.position.set(0, 0, 10);
+    camera.lookAt(0, 0, 0);
+  }, [camera]);
+  return null;
+}
+
+/* ── Main component ── */
+export default function Landing8() {
+  const navigate = useNavigate();
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setShow(true), 100);
+    const onMove = (e: MouseEvent) => {
+      mouse.x = (e.clientX / window.innerWidth - 0.5) * 2;
+      mouse.y = (e.clientY / window.innerHeight - 0.5) * 2;
+    };
+    window.addEventListener('mousemove', onMove, { passive: true });
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('mousemove', onMove);
+    };
+  }, []);
+
+  const reveal = (delayMs: number) => ({
+    opacity: show ? 1 : 0,
+    transform: show ? 'translateY(0)' : 'translateY(20px)',
+    transition: `opacity 900ms ease ${delayMs}ms, transform 900ms cubic-bezier(.16,1,.3,1) ${delayMs}ms`,
+  });
+
+  return (
+    <div
+      className="relative w-screen h-screen overflow-hidden"
+      style={{ fontFamily: "'Inter', sans-serif", background: '#000000' }}
+    >
+      {/* ── 3D Canvas (background) ── */}
+      <div className="absolute inset-0">
+        <Canvas
+          gl={{ antialias: true, alpha: false, toneMapping: THREE.NoToneMapping }}
+          dpr={[1, 2]}
+          style={{ background: '#000000' }}
+        >
+          <CameraSetup />
+          <ambientLight intensity={0.12} color="#fff0e0" />
+          <hemisphereLight args={['#fff5e0', '#1a1820', 0.15]} />
+          <Stars radius={100} depth={80} count={3000} factor={2} saturation={0} fade speed={0.3} />
+
+          {/* Scene content in Suspense — EffectComposer stays outside so it never remounts */}
+          <Suspense fallback={null}>
+            <OrreryScene />
+          </Suspense>
+
+          {/* Postprocessing — outside Suspense, NoToneMapping on renderer, ToneMapping as last effect */}
+          <EffectComposer
+            multisampling={0}
+            frameBufferType={THREE.HalfFloatType}
+            enableNormalPass={false}
+          >
+            <Bloom
+              luminanceThreshold={0.95}
+              luminanceSmoothing={0.2}
+              intensity={1.4}
+              mipmapBlur={false}
+              kernelSize={KernelSize.MEDIUM}
+            />
+            <ToneMapping />
+          </EffectComposer>
+        </Canvas>
+      </div>
+
+      {/* ── HTML Overlay ── */}
+
+      {/* Nav */}
+      <header
+        className="relative z-20 flex items-center justify-between px-8 md:px-14 py-4"
+        style={{ opacity: show ? 1 : 0, transition: 'opacity 600ms ease 100ms' }}
+      >
+        <div className="flex items-center gap-3">
+          <img src={skylyLogo} alt="Skyly" className="w-8 h-8 rounded-lg" />
+          <span
+            className="text-[13px] font-semibold tracking-[0.22em] text-white/75"
+            style={{ fontFamily: "'JetBrains Mono', monospace" }}
+          >
+            SKYLY
+          </span>
         </div>
-        <button className="orrery-signin-btn" onClick={() => navigate('/login')}>
+        <button
+          onClick={() => navigate('/login')}
+          className="text-[11px] text-white/30 hover:text-white/70 transition-colors tracking-[0.18em] uppercase"
+        >
           Sign In
         </button>
-      </nav>
+      </header>
 
-      {/* Perspective container */}
-      <div className="orrery-perspective">
-        <div className="orrery-scene" ref={sceneRef}>
-
-          {/* Orbital ring SVGs */}
-          <div className="orrery-rings-container">
-            <svg
-              className="orrery-ring-svg"
-              width="900" height="500"
-              viewBox="0 0 900 500"
-              style={{ transform: 'translateZ(-50px) rotateX(60deg)', width: '60vw', height: 'auto' }}
-            >
-              <ellipse
-                cx="450" cy="250" rx="420" ry="180"
-                className="orrery-ring-path ring-1"
-                ref={addRingRef(0)}
-              />
-            </svg>
-            <svg
-              className="orrery-ring-svg"
-              width="900" height="500"
-              viewBox="0 0 900 500"
-              style={{ transform: 'translateZ(-30px) rotateX(55deg) rotateZ(15deg)', width: '72vw', height: 'auto' }}
-            >
-              <ellipse
-                cx="450" cy="250" rx="430" ry="160"
-                className="orrery-ring-path ring-2"
-                ref={addRingRef(1)}
-              />
-            </svg>
-            <svg
-              className="orrery-ring-svg"
-              width="900" height="500"
-              viewBox="0 0 900 500"
-              style={{ transform: 'translateZ(-70px) rotateX(65deg) rotateZ(-10deg)', width: '50vw', height: 'auto' }}
-            >
-              <ellipse
-                cx="450" cy="250" rx="400" ry="200"
-                className="orrery-ring-path ring-3"
-                ref={addRingRef(2)}
-              />
-            </svg>
-          </div>
-
-          {/* Earth */}
-          <div className="orrery-body orrery-earth">
-            <img src={earthPng} alt="Earth" />
-            <span className="orrery-label">EARTH</span>
-          </div>
-
-          {/* Satellite */}
-          <div className="orrery-body orrery-satellite">
-            <img src={satellitePng} alt="Satellite" />
-            <span className="orrery-label">SATELLITE</span>
-          </div>
-
-          {/* Moon */}
-          <div className="orrery-body orrery-moon">
-            <img src={moonPng} alt="Moon" />
-            <span className="orrery-label">MOON</span>
-          </div>
-
-          {/* Mars */}
-          <div className="orrery-body orrery-mars">
-            <img src={marsPng} alt="Mars" />
-            <span className="orrery-label">MARS</span>
-          </div>
-
-          {/* Hero text — in the scene so it rotates too */}
-          <div className="orrery-hero">
-            <div className="orrery-hero-inner">
-              <h1>
-                Plan Your Next Data Center<br />
-                <span className="accent">Anywhere in the Solar System.</span>
-              </h1>
-              <p>
-                AI-scored site selection across planets, moons, and orbital stations.
-                Real terrain data meets predictive analytics.
-              </p>
-              <button className="orrery-cta" onClick={() => navigate('/login')}>
-                <Rocket size={18} />
-                Get Started
-                <ArrowRight size={16} />
-              </button>
-            </div>
-          </div>
-
-        </div>
+      {/* Hero text — difference blend makes text react to bright/dark areas */}
+      <div
+        className="relative z-20 max-w-3xl mx-auto px-8 pt-[8vh] md:pt-[12vh] text-center pointer-events-none"
+        style={{ ...reveal(200), mixBlendMode: 'difference' }}
+      >
+        <p
+          className="text-[10px] tracking-[0.45em] text-white/40 uppercase mb-4"
+          style={{ fontFamily: "'JetBrains Mono', monospace" }}
+        >
+          Orbital Infrastructure Platform
+        </p>
+        <h1
+          className="font-bold text-white leading-[1.06]"
+          style={{ fontSize: 'clamp(1.8rem, 4.5vw, 3.5rem)' }}
+        >
+          Plan Your Next Data Center
+          <br />
+          <span className="text-white">Anywhere in the Solar System.</span>
+        </h1>
+        <p className="text-[13px] text-white/30 max-w-md mx-auto leading-relaxed mt-3 mb-6">
+          AI-powered site selection across Earth, orbital stations, the Moon, and Mars.
+        </p>
+        <button
+          onClick={() => navigate('/login')}
+          className="
+            pointer-events-auto
+            inline-flex items-center gap-2 px-7 py-3 rounded-lg
+            bg-[#00e5ff] text-black font-semibold text-[13px]
+            tracking-wide hover:brightness-110 transition-all duration-300
+            hover:shadow-[0_0_40px_rgba(0,229,255,0.28)] active:scale-[0.97]
+          "
+          style={{ mixBlendMode: 'normal' }}
+        >
+          <Rocket className="w-3.5 h-3.5" />
+          Launch Skyly
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Stats bar */}
-      <div className="orrery-stats">
-        <span>7 Regions</span>
-        <span className="orrery-stats-dot" />
-        <span>10+ Satellites</span>
-        <span className="orrery-stats-dot" />
-        <span>4 Bodies</span>
-        <span className="orrery-stats-dot" />
-        <span>AI Scoring</span>
+      <div
+        className="absolute bottom-9 left-0 right-0 z-20"
+        style={{ opacity: show ? 1 : 0, transition: 'opacity 900ms ease 1200ms' }}
+      >
+        <div className="flex justify-center gap-10 md:gap-16">
+          {[
+            { v: '7', l: 'Regions', c: '#3b82f6' },
+            { v: '10+', l: 'Satellites', c: '#00ff66' },
+            { v: '4', l: 'Bodies', c: '#f59e0b' },
+            { v: 'AI', l: 'Scoring', c: '#ef4444' },
+          ].map((s) => (
+            <div key={s.l} className="text-center">
+              <div
+                className="text-sm md:text-base font-bold"
+                style={{ color: s.c, fontFamily: "'JetBrains Mono', monospace" }}
+              >
+                {s.v}
+              </div>
+              <div className="text-[7px] tracking-[0.2em] uppercase" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                {s.l}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Footer */}
-      <div className="orrery-footer">
-        &copy; 2026 Skyly &middot; Orbital Atlas
+      <div
+        className="absolute bottom-0 left-0 right-0 z-20 py-2 px-8 md:px-14 flex items-center justify-between"
+        style={{ opacity: show ? 1 : 0, transition: 'opacity 700ms ease 1400ms' }}
+      >
+        <div className="flex items-center gap-1.5">
+          <img src={skylyLogo} alt="" className="w-3.5 h-3.5 rounded" />
+          <span className="text-[8px]" style={{ color: 'rgba(255,255,255,0.15)' }}>
+            Skyly Orbital Operations
+          </span>
+        </div>
+        <span
+          className="text-[7px] tracking-[0.12em]"
+          style={{ color: 'rgba(255,255,255,0.1)', fontFamily: "'JetBrains Mono', monospace" }}
+        >
+          NASA / POLY PIZZA CC-BY
+        </span>
       </div>
     </div>
   );
