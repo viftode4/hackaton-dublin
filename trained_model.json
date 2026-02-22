@@ -1,0 +1,33 @@
+{
+  "model_type": "ridge_regression",
+  "alpha": 1.0,
+  "features": [
+    "country_ci",
+    "emissions_per_capacity",
+    "local_pct_coal",
+    "local_pct_clean"
+  ],
+  "scaler_mean": [
+    388.6813928196923,
+    1953.1273914183282,
+    0.2413036561553898,
+    0.20058447788479472
+  ],
+  "scaler_scale": [
+    215.93353815668218,
+    895.3980051008897,
+    0.18785678132238628,
+    0.1692258517700346
+  ],
+  "coefficients": [
+    161.4215790586011,
+    -9.684424077725541,
+    31.432097228238547,
+    -20.067134879129938
+  ],
+  "intercept": 331.2820512820512,
+  "training_samples": 39,
+  "loo_mae": 44.176669953564506,
+  "loo_r2": 0.8654241960128738,
+  "analytics_best_model": "SVR (linear)"
+}
