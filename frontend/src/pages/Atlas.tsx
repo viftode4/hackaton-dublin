@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { PanelRightClose, PanelRightOpen } from 'lucide-react';
-import { GROUND_REGIONS, INITIAL_SATELLITES, updateSatellitePosition, getCarbonScoreColor, type GroundRegion, type SatelliteData } from '@/lib/constants';
-import { fetchTLEGroup, computePosition, computeOrbitalMetrics, CURATED_SATELLITE_IDS } from '@/lib/tle-service';
+import { GROUND_REGIONS, INITIAL_SATELLITES, type GroundRegion, type SatelliteData } from '@/lib/constants';
+import { fetchTLEGroup, type TLERecord } from '@/lib/tle-service';
+import { propagateAll, type SatelliteCategory } from '@/lib/satellite-store';
 import GlobeView from '@/components/GlobeView';
 import Sidebar from '@/components/Sidebar';
 import TopNav, { type AppTab } from '@/components/TopNav';
@@ -92,6 +93,14 @@ export default function Atlas() {
   const [powerPlantLOD, setPowerPlantLOD] = useState<PowerPlantLOD | null>(null);
   const [globalDatacenters, setGlobalDatacenters] = useState<DataCenter[]>([]);
 
+  // TLE records for real-time SGP4 propagation
+  const tleRecordsRef = useRef<TLERecord[]>([]);
+  // Active satellite category filters (all on by default)
+  const [activeCategories, setActiveCategories] = useState<Set<SatelliteCategory>>(
+    new Set(['station', 'weather', 'comms', 'earth-obs', 'navigation', 'science', 'other'])
+  );
+  const [satelliteSearch, setSatelliteSearch] = useState('');
+
   // Map of all backend locations for enriching inventory items
   const locationsRef = useRef<Map<string, BackendLocation>>(new Map());
 
@@ -143,70 +152,31 @@ export default function Atlas() {
       });
   }, []);
 
-  // Fetch real TLE satellite data
+  // Fetch ALL active TLE data from CelesTrak via backend proxy
   useEffect(() => {
-    async function loadTLEData() {
+    async function loadAllTLEs() {
       try {
-        const tles = await fetchTLEGroup('stations');
-        // Also try to get active satellites for non-station ones
-        let activeTles: typeof tles = [];
-        try { activeTles = await fetchTLEGroup('active'); } catch { /* ok */ }
-
-        const allTles = [...tles, ...activeTles];
-        const now = new Date();
-        const realSatellites: SatelliteData[] = [];
-
-        for (const [key, noradId] of Object.entries(CURATED_SATELLITE_IDS)) {
-          const tle = allTles.find(t => t.NORAD_CAT_ID === noradId);
-          if (!tle) continue;
-
-          const pos = computePosition(tle, now);
-          if (!pos) continue;
-
-          const metrics = computeOrbitalMetrics(tle);
-
-          // Carbon score: inversely proportional to power availability
-          // Higher power = lower carbon score = greener
-          const carbonScore = Math.round(Math.max(50, 250 - metrics.powerAvailabilityW / 2));
-
-          realSatellites.push({
-            id: key,
-            name: tle.OBJECT_NAME,
-            noradId,
-            inclination: metrics.inclinationDeg,
-            period: metrics.periodMinutes * 60,
-            startLat: pos.lat,
-            startLng: pos.lng,
-            phase: 0,
-            altitude: Math.min(pos.altitude / 6371 * 0.3, 0.5),
-            altitudeKm: Math.round(pos.altitude),
-            status: metrics.radiationLevel === 'low' ? 'OPTIMAL'
-              : metrics.radiationLevel === 'moderate' ? 'CAUTION'
-              : 'HIGH RADIATION',
-            color: getCarbonScoreColor(carbonScore),
-            carbonScore,
-            isStationary: metrics.periodMinutes > 1400,
-            lat: pos.lat,
-            lng: pos.lng,
-            eclipseFraction: metrics.eclipseFraction,
-            radiationLevel: metrics.radiationLevel,
-            powerAvailabilityW: metrics.powerAvailabilityW,
-            latencyMs: metrics.latencyToGroundMs,
-            apogeeKm: metrics.apogeeKm,
-            perigeeKm: metrics.perigeeKm,
-          });
-        }
-
-        if (realSatellites.length > 0) {
-          console.log(`Loaded ${realSatellites.length} real satellites from TLE data`);
-          setSatellites(realSatellites);
+        const tles = await fetchTLEGroup('active');
+        console.log(`Fetched ${tles.length} TLE records from CelesTrak`);
+        tleRecordsRef.current = tles;
+        const sats = propagateAll(tles);
+        if (sats.length > 0) {
+          console.log(`Propagated ${sats.length} satellite positions`);
+          setSatellites(sats);
         }
       } catch (err) {
-        console.warn('TLE fetch failed, using hardcoded satellites:', err);
-        // Keep INITIAL_SATELLITES as fallback
+        console.warn('TLE fetch failed, trying stations group:', err);
+        try {
+          const tles = await fetchTLEGroup('stations');
+          tleRecordsRef.current = tles;
+          const sats = propagateAll(tles);
+          if (sats.length > 0) setSatellites(sats);
+        } catch {
+          console.warn('All TLE fetches failed, using hardcoded satellites');
+        }
       }
     }
-    loadTLEData();
+    loadAllTLEs();
   }, []);
 
   // Load GeoJSON data layers (power plants + global datacenters)
@@ -226,15 +196,13 @@ export default function Atlas() {
     return () => clearInterval(interval);
   }, []);
 
-  // Satellite motion every 1s
+  // Real-time SGP4 propagation every 3s
   useEffect(() => {
     const interval = setInterval(() => {
-      const elapsed = Date.now() / 1000;
-      setSatellites(prev => prev.map(s => {
-        const pos = updateSatellitePosition(s, elapsed);
-        return { ...s, lat: pos.lat, lng: pos.lng };
-      }));
-    }, 1000);
+      if (tleRecordsRef.current.length === 0) return;
+      const sats = propagateAll(tleRecordsRef.current);
+      if (sats.length > 0) setSatellites(sats);
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -553,12 +521,16 @@ export default function Atlas() {
             activeLocation={selectedLocation}
             powerPlantLOD={powerPlantLOD ?? undefined}
             globalDatacenters={globalDatacenters}
+            activeCategories={activeCategories}
+            onActiveCategoriesChange={setActiveCategories}
+            satelliteSearch={satelliteSearch}
+            onSatelliteSearchChange={setSatelliteSearch}
           />
 
           {/* Init overlay */}
           {showInit && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-fade-out-delay">
-              <p className="text-primary text-sm font-medium animate-pulse">Initializing orbital feeds...</p>
+              <p className="text-white/50 text-sm font-medium animate-pulse">Initializing orbital feeds...</p>
             </div>
           )}
 
