@@ -4,8 +4,10 @@ GridSync Hybrid Carbon Engine — Multi-Source Prediction Backend
 Data layers:
   Layer 1: CodeCarbon global_energy_mix.json  (~213 countries)
   Layer 2: Climate TRACE power plants         (11,589 assets)
-  Layer 2b: Climate TRACE fossil fuel ops     (coal mines, refineries)  
+  Layer 2b: Climate TRACE fossil fuel ops     (coal mines, refineries)
+  Layer 2c: WRI GPPD clean plants             (23,559 solar/wind/hydro/nuclear)
   Layer 3: UK Carbon Intensity API            (GB real-time)
+  Layer 4: Electricity Maps zone polygons     (364 grid zones, point-in-polygon)
   Ref: carbon_intensity_per_source.json       (fuel-type weights)
   Ref: Data centers                           (147 hyperscalers)
 
@@ -56,6 +58,11 @@ FOSSIL_TREE = None
 RENEW_PLANTS_DF = None  # WRI Global Power Plant Database (clean plants)
 RENEW_TREE = None
 
+ZONE_POLYGONS = None     # list of shapely MultiPolygon geometries
+ZONE_POLY_NAMES = None   # list of zone names (matches polygon order)
+ZONE_POLY_TREE = None    # shapely STRtree for vectorised point-in-polygon
+ZONE_POLY_CI = {}        # zone_name -> CI value (gCO₂/kWh)
+
 CODECARBON_USA_PATH = "../codecarbon/codecarbon/data/private_infra/2016/usa_emissions.json"
 CODECARBON_CAN_PATH = "../codecarbon/codecarbon/data/private_infra/2023/canada_energy_mix.json"
 REGRESSION_MODEL_PATH = "trained_model.json"
@@ -84,6 +91,7 @@ CLIMATE_TRACE_COAL = "../datasets_tracer/fossil_fuel_operations/DATA/coal-mining
 CLIMATE_TRACE_REFINING = "../datasets_tracer/fossil_fuel_operations/DATA/oil-and-gas-refining_emissions_sources_v5_3_0.csv"
 CLIMATE_TRACE_OILGAS = "../datasets_tracer/fossil_fuel_operations/DATA/oil-and-gas-production_emissions_sources_v5_3_0.csv"
 WRI_GPPD_PATH = "../datasets_tracer/globalpowerplantdatabasev130/global_power_plant_database.csv"
+WORLD_GEOJSON_PATH = "../electricitymaps-contrib/geo/world.geojson"
 CODECARBON_MIX_PATH = "../codecarbon/codecarbon/data/private_infra/global_energy_mix.json"
 CODECARBON_FUEL_PATH = "../codecarbon/codecarbon/data/private_infra/carbon_intensity_per_source.json"
 
@@ -597,6 +605,99 @@ def load_emaps_zones():
 
 
 # =====================================================================
+#  ZONE BOUNDARY POLYGONS (point-in-polygon → grid connectivity)
+# =====================================================================
+def load_zone_polygons():
+    """Load zone boundary polygons from world.geojson for point-in-polygon lookups.
+
+    This maps every lat/lon to its actual electrical grid zone rather than
+    relying on geographic proximity to zone centre-points.  A data-centre
+    in Montreal is correctly placed in CA-QC (92 % hydro, CI ≈ 38) instead
+    of being matched to a nearby fossil plant across the provincial border.
+    """
+    global ZONE_POLYGONS, ZONE_POLY_NAMES, ZONE_POLY_TREE, ZONE_POLY_CI
+    from shapely.geometry import shape
+    from shapely.strtree import STRtree
+    from shapely import prepare as _prepare
+
+    if not os.path.exists(WORLD_GEOJSON_PATH):
+        print("[Zones] ⚠️  world.geojson not found — zone polygons disabled")
+        return
+
+    print("[Zones] Loading zone boundary polygons...")
+    with open(WORLD_GEOJSON_PATH) as f:
+        geo = json.load(f)
+
+    names = []
+    polys = []
+    for feat in geo['features']:
+        zn = feat['properties']['zoneName']
+        poly = shape(feat['geometry'])
+        _prepare(poly)          # pre-compute spatial index for fast contains()
+        names.append(zn)
+        polys.append(poly)
+
+    ZONE_POLY_NAMES = names
+    ZONE_POLYGONS = polys
+    ZONE_POLY_TREE = STRtree(polys)
+
+    # Build zone_name → CI lookup from already-loaded eMaps data
+    ZONE_POLY_CI = {}
+    if EMAPS_ZONE_CI is not None:
+        for i, zk in enumerate(EMAPS_ZONE_KEYS):
+            ZONE_POLY_CI[zk] = float(EMAPS_ZONE_CI[i])
+
+    n_ci = sum(1 for zn in names if zn in ZONE_POLY_CI)
+    print(f"  ✅ {len(polys)} zone polygons, {n_ci} with CI values")
+
+
+def batch_zone_ci(lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
+    """Vectorised zone CI lookup for arrays of (lat, lon).
+
+    Uses shapely STRtree + prepared polygon containment.
+    Falls back to nearest-polygon lookup for coastline edge-cases where
+    a point is just outside a simplified polygon boundary.
+
+    Returns array of shape (N,) with zone CI values (NaN where no zone found).
+    """
+    N = len(lats)
+    if ZONE_POLY_TREE is None or len(ZONE_POLY_CI) == 0:
+        return np.full(N, np.nan)
+
+    from shapely import points as make_points
+    pts = make_points(lons, lats)
+
+    # Vectorised query: returns (input_indices, tree_indices) pairs
+    result = ZONE_POLY_TREE.query(pts, predicate='intersects')
+
+    zone_ci_arr = np.full(N, np.nan)
+    if result.shape[1] > 0:
+        # Assign first matching zone to each point
+        for inp_i, tree_i in zip(result[0], result[1]):
+            if np.isnan(zone_ci_arr[inp_i]):     # first match wins
+                zn = ZONE_POLY_NAMES[tree_i]
+                ci = ZONE_POLY_CI.get(zn)
+                if ci is not None:
+                    zone_ci_arr[inp_i] = ci
+
+    # Fallback: for unmatched points (coastline edge-cases), use nearest polygon
+    # if it's within ~50 km (≈ 0.5° at mid-latitudes)
+    unmatched = np.where(np.isnan(zone_ci_arr))[0]
+    if len(unmatched) > 0:
+        nearest_idx = ZONE_POLY_TREE.nearest(pts[unmatched])
+        for i, ui in enumerate(unmatched):
+            ni = nearest_idx[i]
+            dist_deg = ZONE_POLYGONS[ni].distance(pts[ui])
+            if dist_deg < 0.5:          # ≈ 50 km
+                zn = ZONE_POLY_NAMES[ni]
+                ci = ZONE_POLY_CI.get(zn)
+                if ci is not None:
+                    zone_ci_arr[ui] = ci
+
+    return zone_ci_arr
+
+
+# =====================================================================
 #  LAYER 3: UK API
 # =====================================================================
 def query_uk_carbon_intensity():
@@ -693,24 +794,46 @@ def compute_green_score(
         state_name = US_STATE_ALIASES[state_name]
 
     base_ci = np.nan
-    if country_iso3 == "USA" and state_name in USA_EMISSIONS:
-        base_ci = USA_EMISSIONS[state_name]["emissions"] * 0.453592
-    elif country_iso3 == "CAN" and state_name in CAN_EMISSIONS:
-        mix = CAN_EMISSIONS[state_name]
-        base_ci = (
-            (mix.get("coal", 0) / 100.0) * FUEL_WEIGHTS.get("coal", 995) +
-            (mix.get("naturalGas", 0) / 100.0) * FUEL_WEIGHTS.get("natural_gas", 743) +
-            (mix.get("petroleum", 0) / 100.0) * FUEL_WEIGHTS.get("petroleum", 816) +
-            (mix.get("biomass", 0) / 100.0) * FUEL_WEIGHTS.get("biomass", 230) +
-            (mix.get("solar", 0) / 100.0) * FUEL_WEIGHTS.get("solar", 48) +
-            (mix.get("wind", 0) / 100.0) * FUEL_WEIGHTS.get("wind", 26) +
-            (mix.get("hydro", 0) / 100.0) * FUEL_WEIGHTS.get("hydroelectricity", 26) +
-            (mix.get("nuclear", 0) / 100.0) * FUEL_WEIGHTS.get("nuclear", 29)
-        )
-    elif country_iso3 in CODECARBON_MIX:
-        base_ci = CODECARBON_MIX[country_iso3].get("carbon_intensity", np.nan)
-        if "country_name" in CODECARBON_MIX[country_iso3]:
-            country_name = CODECARBON_MIX[country_iso3]["country_name"]
+    # ── Zone polygon CI (grid connectivity) ──
+    # Prefer sub-national zone CI over coarse country average
+    if ZONE_POLY_TREE is not None:
+        from shapely.geometry import Point as _Point
+        _pt = _Point(lon, lat)
+        _candidates = ZONE_POLY_TREE.query(_pt)
+        for _ci_idx in _candidates:
+            if ZONE_POLYGONS[_ci_idx].contains(_pt):
+                _zn = ZONE_POLY_NAMES[_ci_idx]
+                _zci = ZONE_POLY_CI.get(_zn)
+                if _zci is not None:
+                    base_ci = _zci
+                break
+        # Fallback: nearest polygon within ~50 km for coastline edge-cases
+        if np.isnan(base_ci):
+            _ni = ZONE_POLY_TREE.nearest(_pt)
+            if ZONE_POLYGONS[_ni].distance(_pt) < 0.5:
+                _zn = ZONE_POLY_NAMES[_ni]
+                _zci = ZONE_POLY_CI.get(_zn)
+                if _zci is not None:
+                    base_ci = _zci
+    if np.isnan(base_ci):
+        if country_iso3 == "USA" and state_name in USA_EMISSIONS:
+            base_ci = USA_EMISSIONS[state_name]["emissions"] * 0.453592
+        elif country_iso3 == "CAN" and state_name in CAN_EMISSIONS:
+            mix = CAN_EMISSIONS[state_name]
+            base_ci = (
+                (mix.get("coal", 0) / 100.0) * FUEL_WEIGHTS.get("coal", 995) +
+                (mix.get("naturalGas", 0) / 100.0) * FUEL_WEIGHTS.get("natural_gas", 743) +
+                (mix.get("petroleum", 0) / 100.0) * FUEL_WEIGHTS.get("petroleum", 816) +
+                (mix.get("biomass", 0) / 100.0) * FUEL_WEIGHTS.get("biomass", 230) +
+                (mix.get("solar", 0) / 100.0) * FUEL_WEIGHTS.get("solar", 48) +
+                (mix.get("wind", 0) / 100.0) * FUEL_WEIGHTS.get("wind", 26) +
+                (mix.get("hydro", 0) / 100.0) * FUEL_WEIGHTS.get("hydroelectricity", 26) +
+                (mix.get("nuclear", 0) / 100.0) * FUEL_WEIGHTS.get("nuclear", 29)
+            )
+        elif country_iso3 in CODECARBON_MIX:
+            base_ci = CODECARBON_MIX[country_iso3].get("carbon_intensity", np.nan)
+            if "country_name" in CODECARBON_MIX[country_iso3]:
+                country_name = CODECARBON_MIX[country_iso3]["country_name"]
 
     if math.isnan(base_ci):
         base_ci = world_avg
@@ -874,6 +997,10 @@ def compute_green_score(
         x_scaled = (np.array(x) - np.array(REGRESSION_MODEL["scaler_mean"])) / np.array(REGRESSION_MODEL["scaler_scale"])
         predicted_ci = float(np.dot(np.array(REGRESSION_MODEL["coefficients"]), x_scaled) + REGRESSION_MODEL["intercept"])
     
+    # Hybrid: for clean grids, use zone CI directly (bypasses Ridge noise)
+    if base_ci < 100 and ZONE_POLY_TREE is not None:
+        predicted_ci = base_ci
+
     final_ci = max(0.0, predicted_ci)
 
     live_override_applied = False
@@ -1174,6 +1301,9 @@ def predict_grid_batch(
         dc_dist1 = np.full((N, 1), np.inf)
         dc_ind1 = np.zeros((N, 1), dtype=int)
 
+    # Zone polygon CI lookup (vectorised point-in-polygon)
+    zone_ci_arr = batch_zone_ci(lats, lons)
+
     t_bt = _time.perf_counter()
 
     # ── Pre-classify all plant fuel types once ──
@@ -1237,11 +1367,16 @@ def predict_grid_batch(
                 country_iso3 = nearest_iso
 
         # ── Base CI ──
-        base_ci = np.nan
-        if country_iso3 in CODECARBON_MIX:
-            base_ci = CODECARBON_MIX[country_iso3].get("carbon_intensity", np.nan)
+        # Prefer zone-level CI from polygon lookup (grid connectivity)
+        # over coarse country-level average. This correctly assigns e.g.
+        # Montreal → CA-QC (38 gCO₂/kWh) instead of Canada avg (~110).
+        base_ci = zone_ci_arr[idx]              # NaN if no polygon match
         if np.isnan(base_ci):
-            base_ci = world_avg
+            # Fall back to country-level CI
+            if country_iso3 in CODECARBON_MIX:
+                base_ci = CODECARBON_MIX[country_iso3].get("carbon_intensity", np.nan)
+            if np.isnan(base_ci):
+                base_ci = world_avg
 
         # ── Country fractions ──
         country_fossil_frac = 0.5
@@ -1457,6 +1592,15 @@ def predict_grid_batch(
     else:
         ci_out[:] = world_avg
 
+    # ── Hybrid: use zone CI directly for clean grids ──
+    # For zones with CI < 100 gCO₂/kWh (hydro/nuclear/wind dominated),
+    # the zone power-mix IS the grid truth.  The Ridge model's local
+    # plant features add noise for these zones because the plants that
+    # *actually* supply electricity may be hundreds of km away on the
+    # same transmission grid — not the nearby fossil plants the model sees.
+    clean_zone_mask = np.isfinite(zone_ci_arr) & (zone_ci_arr < 100)
+    ci_out[clean_zone_mask] = zone_ci_arr[clean_zone_mask]
+
     # ── Footprint ──
     base_pue = 1.58
     lat_bonus = np.minimum(0.20, np.abs(lats) * 0.003)
@@ -1507,6 +1651,7 @@ load_fossil_ops()
 load_renewables()
 load_data_centers()
 load_emaps_zones()
+load_zone_polygons()      # must run AFTER load_emaps_zones (needs CI values)
 
 # Test Layer 3
 print("[Layer 3] Testing UK Carbon Intensity API...")

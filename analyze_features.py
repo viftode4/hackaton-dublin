@@ -33,6 +33,7 @@ CLIMATE_TRACE_OILGAS = "../datasets_tracer/fossil_fuel_operations/DATA/oil-and-g
 WRI_GPPD_PATH = "../datasets_tracer/globalpowerplantdatabasev130/global_power_plant_database.csv"
 DC_PATH = "../electricitymaps-contrib/config/data_centers/data_centers.json"
 EMAPS_ZONES_DIR = "../electricitymaps-contrib/config/zones"
+WORLD_GEOJSON_PATH = "../electricitymaps-contrib/geo/world.geojson"
 
 
 def classify_fuel(source_type):
@@ -282,6 +283,33 @@ def main():
     n_with_cap = np.isfinite(zone_clean_frac_arr).sum()
     print(f"    {n_with_cap}/{len(zone_keys)} zones with capacity data")
 
+    # ── 5d. Load zone boundary polygons for point-in-polygon zone CI lookup ──
+    print("\n[5d] Loading zone boundary polygons...")
+    from shapely.geometry import shape as _shape, Point as _Point
+    from shapely.strtree import STRtree as _STRtree
+    from shapely import prepare as _prepare
+    zone_poly_names = []
+    zone_polygons = []
+    zone_poly_ci = {}  # zone_name -> CI value
+    if os.path.exists(WORLD_GEOJSON_PATH):
+        with open(WORLD_GEOJSON_PATH) as f:
+            geo = json.load(f)
+        for feat in geo['features']:
+            zn = feat['properties']['zoneName']
+            poly = _shape(feat['geometry'])
+            _prepare(poly)
+            zone_poly_names.append(zn)
+            zone_polygons.append(poly)
+        zone_poly_tree = _STRtree(zone_polygons) if zone_polygons else None
+        # Build zone_name -> CI from emaps data
+        for zk, zv in emaps_zone_ci.items():
+            zone_poly_ci[zk] = zv['ci']
+        n_ci = sum(1 for zn in zone_poly_names if zn in zone_poly_ci)
+        print(f"    {len(zone_polygons)} zone polygons, {n_ci} with CI values")
+    else:
+        zone_poly_tree = None
+        print("    ⚠️  world.geojson not found — zone polygons disabled")
+
     # ── 6. Map cloud regions to coordinates ──
     # Cloud regions don't have lat/lon directly, but have city names.
     # We'll match them to our DC dataset by region ID.
@@ -357,25 +385,44 @@ def main():
         }
 
         # Feature: Country baseline CI
+        # Prefer zone-level CI from polygon lookup (grid connectivity)
         ci_val = np.nan
-        if country_iso == "USA" and state.lower() in usa_emissions:
-            # Convert lbs/MWh to gCO2/kWh (1 lb = 453.592g, 1 MWh = 1000 kWh -> * 0.453592)
-            ci_val = usa_emissions[state.lower()]["emissions"] * 0.453592
-        elif country_iso == "CAN" and state.lower() in can_emissions:
-            # Calculate from energy mix percentages
-            mix = can_emissions[state.lower()]
-            ci_val = (
-                (mix.get("coal", 0) / 100.0) * fuel_weights.get("coal", 995) +
-                (mix.get("naturalGas", 0) / 100.0) * fuel_weights.get("natural_gas", 743) +
-                (mix.get("petroleum", 0) / 100.0) * fuel_weights.get("petroleum", 816) +
-                (mix.get("biomass", 0) / 100.0) * fuel_weights.get("biomass", 230) +
-                (mix.get("solar", 0) / 100.0) * fuel_weights.get("solar", 48) +
-                (mix.get("wind", 0) / 100.0) * fuel_weights.get("wind", 26) +
-                (mix.get("hydro", 0) / 100.0) * fuel_weights.get("hydroelectricity", 26) +
-                (mix.get("nuclear", 0) / 100.0) * fuel_weights.get("nuclear", 29)
-            )
-        elif country_iso in cc_mix:
-            ci_val = cc_mix[country_iso].get("carbon_intensity", np.nan)
+        if zone_poly_tree is not None:
+            _pt = _Point(lon, lat)
+            _candidates = zone_poly_tree.query(_pt)
+            for _cidx in _candidates:
+                if zone_polygons[_cidx].contains(_pt):
+                    _zn = zone_poly_names[_cidx]
+                    _zci = zone_poly_ci.get(_zn)
+                    if _zci is not None:
+                        ci_val = _zci
+                    break
+            # Fallback: nearest polygon within ~50 km for coastline edge-cases
+            if np.isnan(ci_val):
+                _ni = zone_poly_tree.nearest(_pt)
+                if zone_polygons[_ni].distance(_pt) < 0.5:
+                    _zn = zone_poly_names[_ni]
+                    _zci = zone_poly_ci.get(_zn)
+                    if _zci is not None:
+                        ci_val = _zci
+        if np.isnan(ci_val):
+            # Fall back to country/state-level CI
+            if country_iso == "USA" and state.lower() in usa_emissions:
+                ci_val = usa_emissions[state.lower()]["emissions"] * 0.453592
+            elif country_iso == "CAN" and state.lower() in can_emissions:
+                mix = can_emissions[state.lower()]
+                ci_val = (
+                    (mix.get("coal", 0) / 100.0) * fuel_weights.get("coal", 995) +
+                    (mix.get("naturalGas", 0) / 100.0) * fuel_weights.get("natural_gas", 743) +
+                    (mix.get("petroleum", 0) / 100.0) * fuel_weights.get("petroleum", 816) +
+                    (mix.get("biomass", 0) / 100.0) * fuel_weights.get("biomass", 230) +
+                    (mix.get("solar", 0) / 100.0) * fuel_weights.get("solar", 48) +
+                    (mix.get("wind", 0) / 100.0) * fuel_weights.get("wind", 26) +
+                    (mix.get("hydro", 0) / 100.0) * fuel_weights.get("hydroelectricity", 26) +
+                    (mix.get("nuclear", 0) / 100.0) * fuel_weights.get("nuclear", 29)
+                )
+            elif country_iso in cc_mix:
+                ci_val = cc_mix[country_iso].get("carbon_intensity", np.nan)
             
         features["country_ci"] = ci_val
 
