@@ -1346,6 +1346,30 @@ def predict_grid_batch(
     return {"ci": ci_out, "fp": fp_out, "tb": tb_out}
 
 
+def predict_ci(lat: float, lon: float, year: int = 2024) -> float:
+    """
+    Simple inference: (lat, lon, year) → carbon intensity in gCO₂/kWh.
+
+    This is the primary public interface. Under the hood it:
+      1. Finds nearby power plants via BallTree spatial query
+      2. Projects per-plant emissions to the target year
+      3. Computes local energy-mix features from the projected infrastructure
+      4. Runs a Ridge regression to predict carbon intensity
+
+    Examples:
+        >>> predict_ci(48.8566, 2.3522, 2024)   # Paris, today
+        78.3
+        >>> predict_ci(51.5, 14.5, 2030)         # Poland-Germany border, 2030
+        392.4
+    """
+    result = predict_grid_batch(
+        np.array([lat]), np.array([lon]),
+        it_load_mw=1.0,   # irrelevant for CI, only affects footprint
+        target_year=year,
+    )
+    return float(result["ci"][0])
+
+
 # =====================================================================
 #  STARTUP (guarded for import)
 # =====================================================================
@@ -1523,6 +1547,29 @@ async def list_countries():
             "carbon_intensity": ci, "green_score": round(score, 1), "grade": grade,
         })
     return sorted(result, key=lambda x: x["green_score"], reverse=True)
+
+
+@app.get("/predict")
+async def api_predict_ci(
+    lat: float,
+    lon: float,
+    year: int = 2024,
+):
+    """
+    Simple prediction: (lat, lon, year) → carbon intensity.
+
+    Example: /predict?lat=48.86&lon=2.35&year=2028
+    """
+    ci = predict_ci(lat, lon, year)
+    pue = estimate_pue(lat)
+    fp_tonnes = 1.0 * pue * ci * 8.76  # per 1 MW
+    return {
+        "lat": lat,
+        "lon": lon,
+        "year": year,
+        "carbon_intensity_gCO2_kWh": round(ci, 1),
+        "footprint_tCO2_per_MW_per_year": round(fp_tonnes, 0),
+    }
 
 
 @app.get("/api/health")
