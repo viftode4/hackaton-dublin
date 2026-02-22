@@ -53,6 +53,9 @@ POWER_TREE = None
 FOSSIL_OPS_DF = None    # Coal mines + oil refineries + gas production
 FOSSIL_TREE = None
 
+RENEW_PLANTS_DF = None  # WRI Global Power Plant Database (clean plants)
+RENEW_TREE = None
+
 CODECARBON_USA_PATH = "../codecarbon/codecarbon/data/private_infra/2016/usa_emissions.json"
 CODECARBON_CAN_PATH = "../codecarbon/codecarbon/data/private_infra/2023/canada_energy_mix.json"
 REGRESSION_MODEL_PATH = "trained_model.json"
@@ -80,6 +83,7 @@ CLIMATE_TRACE_POWER = "../datasets_tracer/power/DATA/electricity-generation_emis
 CLIMATE_TRACE_COAL = "../datasets_tracer/fossil_fuel_operations/DATA/coal-mining_emissions_sources_v5_3_0.csv"
 CLIMATE_TRACE_REFINING = "../datasets_tracer/fossil_fuel_operations/DATA/oil-and-gas-refining_emissions_sources_v5_3_0.csv"
 CLIMATE_TRACE_OILGAS = "../datasets_tracer/fossil_fuel_operations/DATA/oil-and-gas-production_emissions_sources_v5_3_0.csv"
+WRI_GPPD_PATH = "../datasets_tracer/globalpowerplantdatabasev130/global_power_plant_database.csv"
 CODECARBON_MIX_PATH = "../codecarbon/codecarbon/data/private_infra/global_energy_mix.json"
 CODECARBON_FUEL_PATH = "../codecarbon/codecarbon/data/private_infra/carbon_intensity_per_source.json"
 
@@ -350,6 +354,69 @@ def load_fossil_ops():
             pass
     else:
         print("  ⚠️ No fossil operation data loaded")
+
+
+# =====================================================================
+#  LAYER 2c: WRI Renewable Plants
+# =====================================================================
+def load_renewables():
+    """Load WRI Global Power Plant Database — clean energy plants only.
+
+    These plants have lat/lon + capacity but NO emissions (they're clean).
+    Used to correct local_pct_clean and dilute IDW-weighted CI near
+    hydro/nuclear/solar/wind-dominated grids.
+    """
+    global RENEW_PLANTS_DF, RENEW_TREE
+    import pickle
+
+    cache_file = _cache_path("renew_plants.pkl")
+    source_mtime = _source_mtime(WRI_GPPD_PATH)
+
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "rb") as f:
+                cached = pickle.load(f)
+            if cached.get("source_mtime") == source_mtime:
+                RENEW_PLANTS_DF = cached["df"]
+                coords = np.radians(RENEW_PLANTS_DF[['latitude', 'longitude']].values)
+                RENEW_TREE = BallTree(coords, metric='haversine')
+                print(f"[Layer 2c] ⚡ Loaded {len(RENEW_PLANTS_DF)} renewable plants from cache")
+                return
+        except Exception:
+            pass
+
+    print("[Layer 2c] Loading WRI Global Power Plant Database (renewables)...")
+    clean_fuels = {'Solar', 'Wind', 'Hydro', 'Nuclear', 'Geothermal', 'Wave and Tidal'}
+    df = pd.read_csv(WRI_GPPD_PATH, low_memory=False)
+    df = df[df['primary_fuel'].isin(clean_fuels)].copy()
+    df = df.dropna(subset=['latitude', 'longitude', 'capacity_mw'])
+    df = df[df['capacity_mw'] > 0]
+
+    # Classify fuel type to match our naming convention
+    fuel_map = {
+        'Hydro': 'hydroelectricity', 'Nuclear': 'nuclear',
+        'Solar': 'solar', 'Wind': 'wind',
+        'Geothermal': 'geothermal', 'Wave and Tidal': 'hydroelectricity',
+    }
+    df['fuel_cat'] = df['primary_fuel'].map(fuel_map)
+
+    RENEW_PLANTS_DF = df[['name', 'country', 'primary_fuel', 'fuel_cat',
+                          'capacity_mw', 'latitude', 'longitude']].reset_index(drop=True)
+
+    coords = np.radians(RENEW_PLANTS_DF[['latitude', 'longitude']].values)
+    RENEW_TREE = BallTree(coords, metric='haversine')
+    print(f"  ✅ {len(RENEW_PLANTS_DF)} clean power plants")
+    by_fuel = RENEW_PLANTS_DF['primary_fuel'].value_counts()
+    for fuel, cnt in by_fuel.items():
+        print(f"     {fuel}: {cnt}")
+
+    try:
+        with open(cache_file, "wb") as f:
+            pickle.dump({"source_mtime": source_mtime, "df": RENEW_PLANTS_DF},
+                        f, protocol=pickle.HIGHEST_PROTOCOL)
+        print(f"  💾 Cached to {cache_file}")
+    except Exception as e:
+        print(f"  ⚠️ Cache save failed: {e}")
 
 
 # =====================================================================
@@ -1090,6 +1157,16 @@ def predict_grid_batch(
     else:
         fo_indices = [np.array([], dtype=int)] * N
 
+    # Renewable plants within radius (WRI GPPD)
+    if RENEW_TREE is not None:
+        rn_indices = RENEW_TREE.query_radius(coords_rad, r=radius_rad)
+        rn_caps = RENEW_PLANTS_DF['capacity_mw'].values
+        rn_lat_r = np.radians(RENEW_PLANTS_DF['latitude'].values)
+        rn_lon_r = np.radians(RENEW_PLANTS_DF['longitude'].values)
+        rn_fuel_ci = np.array([FUEL_WEIGHTS.get(fc, 0) for fc in RENEW_PLANTS_DF['fuel_cat'].values])
+    else:
+        rn_indices = [np.array([], dtype=int)] * N
+
     # Nearest data center
     if DC_TREE is not None:
         dc_dist1, dc_ind1 = DC_TREE.query(coords_rad, k=1)
@@ -1207,38 +1284,71 @@ def predict_grid_batch(
             is_coal_loc = all_is_coal[pp_idx]
             is_fossil_loc = all_is_fossil[pp_idx]
 
+            # Count nearby renewable plants (WRI) for accurate mix fractions
+            rn_idx = rn_indices[idx]
+            n_renew_nearby = len(rn_idx)
+            renew_cap_nearby = float(rn_caps[rn_idx].sum()) if n_renew_nearby > 0 and RENEW_TREE is not None else 0.0
+
             # When projecting to a future year, exclude retired plants
             # (projected emissions <= 0) from mix fractions
             if target_year is not None:
                 active = ~all_is_retired[pp_idx]
-                n_active = int(active.sum())
-                if n_active > 0:
-                    local_pct_coal = float(is_coal_loc[active].sum()) / n_active
-                    local_pct_fossil = float(is_fossil_loc[active].sum()) / n_active
+                n_active_fossil = int(active.sum())
+                n_total = n_active_fossil + n_renew_nearby
+                if n_total > 0:
+                    local_pct_coal = float(is_coal_loc[active].sum()) / n_total
+                    local_pct_fossil = float(is_fossil_loc[active].sum()) / n_total
                 else:
                     local_pct_coal = 0.0
                     local_pct_fossil = 0.0
             else:
-                local_pct_coal = is_coal_loc.sum() / n_plants
-                local_pct_fossil = is_fossil_loc.sum() / n_plants
+                n_total = n_plants + n_renew_nearby
+                local_pct_coal = is_coal_loc.sum() / n_total if n_total > 0 else 0.0
+                local_pct_fossil = is_fossil_loc.sum() / n_total if n_total > 0 else 0.0
             local_pct_clean = max(0.0, 1.0 - local_pct_fossil)
 
-            # IDW-weighted CI — weight by projected generation for time-varying boundaries
+            # Also factor renewables into emissions_per_capacity
+            total_cap = cap_sum + renew_cap_nearby
+            if total_cap > 0:
+                emissions_per_capacity = emi_loc.sum() / total_cap
+
+            # IDW-weighted CI — include both fossil (Climate TRACE) and
+            # renewable (WRI) plants, so clean plants dilute the CI signal
             d_rad = np.sqrt((all_lat_r[pp_idx] - lat_r)**2 + (all_lon_r[pp_idx] - lon_r)**2)
             dk_km = np.maximum(d_rad * 6371.0, 1.0)
             w_idw = 1.0 / (dk_km ** 2)
             fuel_ci_loc = all_fuel_ci[pp_idx]
+
+            # Renewable IDW contribution (CI ≈ 0 for clean plants)
+            if n_renew_nearby > 0 and RENEW_TREE is not None:
+                d_rn = np.sqrt((rn_lat_r[rn_idx] - lat_r)**2 + (rn_lon_r[rn_idx] - lon_r)**2)
+                dk_rn = np.maximum(d_rn * 6371.0, 1.0)
+                w_rn = 1.0 / (dk_rn ** 2)
+                # Weight by capacity for renewables (they have no emissions/activity data)
+                w_rn_cap = w_rn * rn_caps[rn_idx]
+                rn_ci = rn_fuel_ci[rn_idx]  # ~0 for hydro/solar/wind/nuclear
+            else:
+                w_rn_cap = np.array([])
+                rn_ci = np.array([])
+
             if target_year is not None:
                 # Weight IDW by projected generation (capacity * trend scale)
                 gen_weight = caps_loc * np.maximum(0, 1.0 + all_trend_b[pp_idx] * (target_year - 2024))
-                w_idw_gen = w_idw * gen_weight
-                w_sum = w_idw_gen.sum()
+                w_fossil = w_idw * gen_weight
+                # Combine fossil + renewable IDW
+                all_w = np.concatenate([w_fossil, w_rn_cap]) if len(w_rn_cap) > 0 else w_fossil
+                all_ci = np.concatenate([fuel_ci_loc, rn_ci]) if len(rn_ci) > 0 else fuel_ci_loc
+                w_sum = all_w.sum()
                 if w_sum > 0:
-                    idw_weighted_ci = float(np.sum(w_idw_gen * fuel_ci_loc) / w_sum)
+                    idw_weighted_ci = float(np.sum(all_w * all_ci) / w_sum)
             else:
-                w_sum = w_idw.sum()
+                # Weight fossil by capacity too for consistency
+                w_fossil_cap = w_idw * caps_loc
+                all_w = np.concatenate([w_fossil_cap, w_rn_cap]) if len(w_rn_cap) > 0 else w_fossil_cap
+                all_ci = np.concatenate([fuel_ci_loc, rn_ci]) if len(rn_ci) > 0 else fuel_ci_loc
+                w_sum = all_w.sum()
                 if w_sum > 0:
-                    idw_weighted_ci = float(np.sum(w_idw * fuel_ci_loc) / w_sum)
+                    idw_weighted_ci = float(np.sum(all_w * all_ci) / w_sum)
 
             # Generation-weighted emission factor
             ef_loc = all_ef[pp_idx]
@@ -1258,6 +1368,21 @@ def predict_grid_batch(
             caps_t = np.where(np.isfinite(caps_loc) & (caps_loc > 0), caps_loc, 1.0)
             wt = caps_t / max(caps_t.sum(), 1.0)
             local_trend_b_val = float(np.sum(all_trend_b[pp_idx] * wt))
+
+        elif RENEW_TREE is not None:
+            # No fossil plants nearby but check for renewable plants
+            rn_idx = rn_indices[idx]
+            n_renew_nearby = len(rn_idx)
+            if n_renew_nearby > 0:
+                local_pct_clean = 1.0
+                local_pct_coal = 0.0
+                # IDW from renewables only → very low CI
+                d_rn = np.sqrt((rn_lat_r[rn_idx] - lat_r)**2 + (rn_lon_r[rn_idx] - lon_r)**2)
+                dk_rn = np.maximum(d_rn * 6371.0, 1.0)
+                w_rn = (1.0 / dk_rn**2) * rn_caps[rn_idx]
+                w_sum = w_rn.sum()
+                if w_sum > 0:
+                    idw_weighted_ci = float(np.sum(w_rn * rn_fuel_ci[rn_idx]) / w_sum)
 
         # Fallback to country trend
         if local_trend_b_val == 0.0 and country_iso3 in COUNTRY_TRENDS:
@@ -1379,6 +1504,7 @@ print("=" * 60)
 load_codecarbon()
 load_power_plants()
 load_fossil_ops()
+load_renewables()
 load_data_centers()
 load_emaps_zones()
 
