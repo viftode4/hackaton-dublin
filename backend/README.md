@@ -1,4 +1,4 @@
-# Orbital Atlas — Backend
+# Skyly — Backend
 
 REST API built with **Ruby on Rails 7.1** powering AI report generation, location data, payments, and blockchain integration.
 

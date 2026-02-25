@@ -1,4 +1,4 @@
-# Orbital Atlas — Frontend
+# Skyly — Frontend
 
 Interactive 3D solar system explorer built with **React 19**, **Three.js**, and **TypeScript**.
 

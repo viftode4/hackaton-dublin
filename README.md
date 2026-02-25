@@ -1,8 +1,8 @@
-# Orbital Atlas — Data Center Feasibility Estimator
+# Skyly — Orbital Atlas | Data Center Feasibility Estimator
 
 > *"The same tool that helps you pick between Iceland and Singapore today will help you evaluate the lunar south pole tomorrow."*
 
-**Orbital Atlas** is a 3D interactive solar system explorer where users evaluate data center placement across Earth, the Moon, and Mars. Powered by AI-generated feasibility reports, blockchain-verified portfolio records, and real sustainability data — built in 48 hours at **HackEurope Dublin 2026**.
+**Skyly (Orbital Atlas)** is a 3D interactive solar system explorer where users evaluate data center placement across Earth, the Moon, and Mars. Powered by AI-generated feasibility reports, blockchain-verified portfolio records, and real sustainability data — built in 48 hours at **HackEurope Dublin 2026**.
 
 ![React](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)

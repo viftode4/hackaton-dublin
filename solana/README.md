@@ -1,4 +1,4 @@
-# Orbital Atlas — Solana Service
+# Skyly — Solana Service
 
 Rust microservice for minting data center portfolio records as **memo transactions** on **Solana devnet**.
 
