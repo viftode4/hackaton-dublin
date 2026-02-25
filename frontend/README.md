@@ -1,73 +1,62 @@
-# Welcome to your Lovable project
+# Orbital Atlas — Frontend
 
-## Project info
+Interactive 3D solar system explorer built with **React 19**, **Three.js**, and **TypeScript**.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Tech Stack
 
-## How can I edit this code?
+- **React 19** with Vite bundler
+- **Three.js** via React Three Fiber + drei (3D globe rendering)
+- **react-globe.gl** (WebGL globe with location markers)
+- **shadcn/ui** (Radix UI + Tailwind CSS)
+- **Recharts** (portfolio analytics charts)
+- **React Query** (data fetching and caching)
+- **React Router v6** (client-side routing)
+- **Zod + React Hook Form** (form validation)
+- **satellite.js** (orbital propagation for satellite visualization)
 
-There are several ways of editing your application.
+## Pages
 
-**Use Lovable**
+| Page | Description |
+|------|-------------|
+| `Landing8.tsx` | Cinematic 3D landing page with Earth/Sun/Mars scene |
+| `Atlas.tsx` | Main application — 3D globe, AI panels, inventory |
+| `Payment.tsx` | Stripe checkout for blueprint reports |
+| `PaymentSuccess.tsx` | Post-payment confirmation |
+| `Login.tsx` / `Signup.tsx` | Authentication |
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Key Components
 
-Changes made via Lovable will be committed automatically to this repo.
+| Component | Description |
+|-----------|-------------|
+| `GlobeView` | Three.js 3D globe with interactive location markers |
+| `ChatPanel` | AI advisor chat interface with streaming responses |
+| `ScorecardPanel` | 6-axis feasibility scorecard display |
+| `InventoryPanel` | User's data center portfolio management |
+| `ComparePanel` | Side-by-side location comparison |
+| `RankingsPanel` | Location leaderboard by various metrics |
+| `OrbitSidebar` | Satellite/orbit visualization controls |
+| `LocationDetailCard` | Location details with purchase options |
 
-**Use your preferred IDE**
+## Setup
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```bash
+bun install
+cp .env.example .env   # Set VITE_API_URL
+bun run dev            # http://localhost:5173
 ```
 
-**Edit a file directly in GitHub**
+## Scripts
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+bun run dev        # Development server
+bun run build      # Production build
+bun run preview    # Preview production build
+bun run test       # Run tests (Vitest)
+bun run test:watch # Watch mode
+```
 
-**Use GitHub Codespaces**
+## Environment
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_API_URL` | `http://localhost:3000` | Backend API base URL |
