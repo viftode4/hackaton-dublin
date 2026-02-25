@@ -1,0 +1,7 @@
+# Fix GitHub language detection — show TypeScript/Ruby/Rust instead of HTML
+frontend/src/**/*.tsx linguist-language=TypeScript
+frontend/src/**/*.ts linguist-language=TypeScript
+backend/**/*.rb linguist-language=Ruby
+solana/src/**/*.rs linguist-language=Rust
+docs/** linguist-documentation
+*.html linguist-vendored
